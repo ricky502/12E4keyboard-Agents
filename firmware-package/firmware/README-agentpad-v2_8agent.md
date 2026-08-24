@@ -5,6 +5,9 @@
 后续修复版：`cxt_studio_12e4_agentpad_v3_encoderfix.hex`。此版本在固件层
 强制截断四个旋钮的原厂媒体音量/RGB 动作，只保留 Agentpad Raw HID 事件。
 
+已验证版本：`cxt_studio_12e4_agentpad_v4_encoderfix_verified.hex`。该版本
+修复了 v3 中旋钮回调未实际阻止 QMK 默认音量分支的问题；应优先使用此文件。
+
 ## 本版本内容
 
 - 第一排：探春、黛玉、湘云、香菱
