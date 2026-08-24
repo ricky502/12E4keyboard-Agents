@@ -172,6 +172,13 @@ def local_volume(clockwise):
     if result["ok"]:
         try:
             result["volume"] = int(result["stdout"].strip())
+            # The firmware no longer uses native volume HID keys (otherwise
+            # every encoder changes volume), so provide an equivalent visible
+            # acknowledgement for the dedicated third encoder.
+            subprocess.Popen([
+                "osascript", "-e",
+                f'display notification "音量 {result["volume"]}%" with title "Agentpad · 第三个旋钮"',
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except ValueError:
             pass
     return result
