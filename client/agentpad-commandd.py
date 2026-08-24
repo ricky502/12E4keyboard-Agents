@@ -32,7 +32,10 @@ DEFAULT_CONFIG = {
         "xiangling": {"kind": "feishu", "app_id": "cli_aafd607dfd78dcd8"},
         "baochai": {"kind": "feishu", "app_id": "cli_a935e72632f85cc6"},
         "yinger": {"kind": "feishu", "app_id": "cli_a9633fc1823cdcdd"},
-        "codex": {"kind": "local", "app": "Codex Monitor"},
+        # ChatGPT registers the ``codex://`` scheme on macOS. It opens the
+        # native Codex surface directly; there is no separate “Codex Monitor”
+        # application to launch.
+        "codex": {"kind": "uri", "uri": "codex://"},
         "claude-vscode": {"kind": "local", "app": "Visual Studio Code"},
     },
     "commands": {},
@@ -73,6 +76,8 @@ def load_config(path):
 
 def open_target(target):
     kind = target.get("kind")
+    if kind == "uri" and target.get("uri"):
+        return open_uri(target["uri"])
     if kind == "feishu" and target.get("app_id"):
         # Official Feishu AppLink: cli_ IDs identify bots, whereas the old
         # oc_ chat IDs do not reliably navigate the desktop client.
@@ -164,7 +169,10 @@ def dispatch(cfg, body):
         if not target:
             return {"ok": False, "err": "unknown agent", "agent": agent}
         if agent == "claude-vscode":
-            return open_uri("vscode://command/claude-vscode.editor.openLast")
+            # Opening VS Code itself is stable across Claude extension
+            # versions. Extension command IDs are intentionally not used for
+            # selection because they change between releases.
+            return open_target(target)
         return open_target(target)
     if action == "talk":
         # In v1 the PTT key only focuses the selected conversation. Feishu
@@ -174,7 +182,7 @@ def dispatch(cfg, body):
         if not target:
             return {"ok": False, "err": "unknown agent", "agent": agent}
         if agent == "claude-vscode":
-            return open_uri("vscode://command/claude-vscode.editor.openLast")
+            return open_target(target)
         return open_target(target)
     target = cfg.get("targets", {}).get(agent, {})
     if target.get("kind") == "feishu" and action in {"new_task", "approve", "reject"}:

@@ -36,9 +36,9 @@ class CodexAppServer:
         # npm entry point uses `#!/usr/bin/env node`, so expose the locally
         # installed Node runtime explicitly when this is a background service.
         env = os.environ.copy()
-        node_dir = "/usr/local/bin"
-        if node_dir not in env.get("PATH", "").split(":"):
-            env["PATH"] = node_dir + ":" + env.get("PATH", "")
+        node_dirs = ["/opt/homebrew/bin", "/usr/local/bin"]
+        path_entries = env.get("PATH", "").split(":")
+        env["PATH"] = ":".join([p for p in node_dirs if p not in path_entries] + path_entries)
         self.proc = subprocess.Popen(
             [self.codex_bin, "app-server", "--stdio"],
             cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -49,9 +49,13 @@ class CodexAppServer:
         # the initialize handshake, even when Agentpad opts into no optional
         # capabilities. Without it the server can drop the connection before
         # replying, leaving the model dial unresponsive.
-        self.call("initialize", {"clientInfo": {
-            "name": "agentpad", "title": "Agentpad", "version": "0.1"
-        }, "capabilities": {}})
+        try:
+            self.call("initialize", {"clientInfo": {
+                "name": "agentpad", "title": "Agentpad", "version": "0.1"
+            }, "capabilities": {}})
+        except Exception as exc:
+            self.close()
+            raise RuntimeError(f"Codex app-server initialization failed: {exc}") from exc
         self.notify("initialized", {})
 
     def _read_loop(self):
