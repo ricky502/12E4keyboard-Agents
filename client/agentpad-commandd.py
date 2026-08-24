@@ -174,10 +174,12 @@ def run_codex_command_key(action):
         quartz.CGEventKeyboardSetUnicodeString.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ushort)]
         cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
         cf.CFRelease.argtypes = [ctypes.c_void_p]
-        if action == "new_task":
+        texts = {"new_task": "/new", "reject": "/stop"}
+        if action in texts:
             # Inject text as Unicode, not physical key codes: Chinese IMEs map
-            # the physical slash key to 、, while Unicode reliably yields /new.
-            text = "/new"
+            # the physical slash key to 、, while Unicode reliably yields a
+            # Codex slash command.
+            text = texts[action]
             chars = (ctypes.c_ushort * len(text))(*(ord(ch) for ch in text))
             event = quartz.CGEventCreateKeyboardEvent(None, 0, True)
             if not event:
@@ -186,9 +188,7 @@ def run_codex_command_key(action):
             quartz.CGEventPost(0, event)
             cf.CFRelease(event)
             time.sleep(0.08)
-            sequence = [36]  # Return, sent only after /new has arrived.
-        else:
-            sequence = [53]  # Escape = Codex decline/cancel.
+            sequence = [36]  # Return, sent only after the command arrives.
         for key_code in sequence:
             for pressed in (True, False):
                 event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
