@@ -407,16 +407,15 @@ class Daemon:
                 if pkt["pressed"] or action in ("talk", "approve"):
                     self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot,
                                           pressed=bool(pkt["pressed"]))
-            # Encoder presses are one-shot controls; releasing them must not
-            # replay a system action (especially Sleep).
+            # Restored firmware emits the owner's original native shortcuts:
+            # Option / Return / Copy / Paste.  Do not duplicate them here.
             if pkt["pressed"] and slot in ENCODER_PRESS_SLOTS:
-                self._forward_command("encoder_press", "codex",
-                                      ENCODER_PRESS_SLOTS[slot])
+                log(f"⏺ encoder press {ENCODER_PRESS_SLOTS[slot]} (native backup mapping)")
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")
-            self._forward_command("encoder", AGENT_SLOTS.get(self.selected_agent),
-                                  pkt["enc"], clockwise=bool(pkt["cw"]))
+            # The firmware performs the backup JSON mapping directly.  This
+            # prevents the former Codex model/effort routing from returning.
 
     def _forward_key(self, ev):
         url = self.cfg.get("key_forward_url") or ""
