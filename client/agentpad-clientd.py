@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
                   "terminal_state_timeout_s": 1800}
 HEARTBEAT_S = 2.0
 MISSES_TILL_OFFLINE = 3
+RECONNECT_SCAN_S = 5.0
 # 状态超过此时间没有更新，/health 标为 stale。
 STATE_STALE_S = 15 * 60
 
@@ -147,17 +148,24 @@ class KeyboardLink:
         self.mock = mock
         self.lib = None if mock else load_hidapi()
         self.dev = None
+        # HID handles become invalid immediately when the keyboard is unplugged.
+        # Keep every open/read/write/close operation serialized so a status
+        # update can never write through a handle another thread just closed.
+        self._io_lock = threading.RLock()
         self.virtual = Virtual12E4() if mock else None
         self.last_sent = []  # mock: 发往键盘的包 (测试用)
 
     def open(self) -> bool:
         if self.mock:
             return True
-        path = enumerate_raw_interface(self.lib)
-        if not path:
-            return False
-        self.dev = self.lib.hid_open_path(path)
-        return bool(self.dev)
+        with self._io_lock:
+            if self.dev:
+                return True
+            path = enumerate_raw_interface(self.lib)
+            if not path:
+                return False
+            self.dev = self.lib.hid_open_path(path)
+            return bool(self.dev)
 
     def send(self, pkt: bytes) -> bool:
         """-> False = 设备故障 (调用方应转 offline 并重连)."""
@@ -166,8 +174,13 @@ class KeyboardLink:
                 self.last_sent.append(pkt)
                 self.virtual.feed(pkt)
                 return True
-            buf = create_string_buffer(b"\x00" + pkt, 33)  # macOS 前置 report-id 0
-            return self.lib.hid_write(self.dev, buf, 33) == 33
+            with self._io_lock:
+                # Do not call into hidapi after unplug/close. hidapi's macOS
+                # backend dereferences a null handle and would SIGSEGV.
+                if not self.dev:
+                    return False
+                buf = create_string_buffer(b"\x00" + pkt, 33)  # macOS 前置 report-id 0
+                return self.lib.hid_write(self.dev, buf, 33) == 33
         except Exception:
             return False
 
@@ -176,17 +189,23 @@ class KeyboardLink:
         if self.mock:
             if self.virtual.outbox:
                 raw = self.virtual.outbox.pop(0)
-        elif self.dev:
-            buf = create_string_buffer(64)
-            n = self.lib.hid_read_timeout(self.dev, buf, 64, timeout_ms)
-            if n > 0:
-                raw = buf.raw[:n]
+        else:
+            with self._io_lock:
+                if not self.dev:
+                    return None
+                buf = create_string_buffer(64)
+                n = self.lib.hid_read_timeout(self.dev, buf, 64, timeout_ms)
+                if n > 0:
+                    raw = buf.raw[:n]
         return parse(raw) if raw else None
 
     def close(self):
-        if not self.mock and self.dev:
-            self.lib.hid_close(self.dev)
-            self.dev = None
+        if self.mock:
+            return
+        with self._io_lock:
+            dev, self.dev = self.dev, None
+            if dev:
+                self.lib.hid_close(dev)
 
 
 # --------------------------------------------------------------------------
@@ -215,6 +234,7 @@ class Daemon:
         self._misses = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._next_reconnect_scan = 0.0
         self.selected_agent = 0
         self._press_times = {}
 
@@ -304,6 +324,13 @@ class Daemon:
         while not self._stop.is_set():
             self.expire_agent_states()
             if not self.link.mock and not self.link.dev:
+                now = time.monotonic()
+                # When unplugged, only scan for a returned USB device. Never
+                # perform HID I/O until a fresh handle was opened.
+                if now < self._next_reconnect_scan:
+                    self._stop.wait(min(HEARTBEAT_S, self._next_reconnect_scan - now))
+                    continue
+                self._next_reconnect_scan = now + RECONNECT_SCAN_S
                 if self.link.open():          # 重连成功
                     log("✅ 键盘重新上线, 重刷灯态")
                     self.online, self._misses = False, 0
