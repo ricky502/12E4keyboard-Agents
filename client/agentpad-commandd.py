@@ -61,6 +61,11 @@ CODEX = (CodexAppServer(codex_bin="/Users/ricky/.npm-global/bin/codex",
                         on_state=publish_local_agent_state)
          if CodexAppServer else None)
 
+# This deliberately lives only in the running local service: brightness is
+# restored after a service restart, and no keyboard setting needs to be saved.
+KEYBOARD_LIGHTS_ON = True
+KEYBOARD_ON_BRIGHTNESS = 160
+
 
 def load_config(path):
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
@@ -118,6 +123,34 @@ def local_play_pause():
     """Send the Mac's F8/media play-pause key to the frontmost system target."""
     return run_local_applescript(
         'tell application "System Events" to key code 100', "play_pause")
+
+
+def toggle_keyboard_lights():
+    """Toggle all keyboard LEDs without changing the agents' saved states."""
+    global KEYBOARD_LIGHTS_ON
+    value = 0 if KEYBOARD_LIGHTS_ON else KEYBOARD_ON_BRIGHTNESS
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:8124/brightness",
+            data=json.dumps({"value": value}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=2) as response:
+            response.read()
+        KEYBOARD_LIGHTS_ON = not KEYBOARD_LIGHTS_ON
+        return {"ok": True, "action": "keyboard_lights",
+                "lights_on": KEYBOARD_LIGHTS_ON}
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "action": "keyboard_lights", "err": str(exc)}
+
+
+def sleep_computer():
+    """Request normal macOS sleep only when the owner presses encoder two."""
+    try:
+        subprocess.Popen(["pmset", "sleepnow"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        return {"ok": True, "action": "sleep_computer"}
+    except OSError as exc:
+        return {"ok": False, "action": "sleep_computer", "err": str(exc)}
 
 
 def local_volume(clockwise):
@@ -245,6 +278,19 @@ def dispatch(cfg, body):
         return run_backup_bottom_hotkey("approve", body.get("pressed", True))
     if action in {"reject", "new_task"}:
         return run_codex_command_key(action)
+    if action == "encoder_press":
+        enc = int(body.get("source", -1))
+        # Left-to-right: model/light switch, effort/sleep switch,
+        # volume/play switch, zoom (no press action requested).
+        if enc == 2:
+            return toggle_keyboard_lights()
+        if enc == 3:
+            return sleep_computer()
+        if enc == 1:
+            return local_play_pause()
+        if enc == 0:
+            return {"ok": True, "action": "zoom_press_unassigned"}
+        return {"ok": False, "err": "unknown encoder press", "encoder": enc}
     target = cfg.get("targets", {}).get(agent, {})
     if target.get("kind") == "feishu" and action in {"new_task", "approve", "reject"}:
         # Keep every remote-Agent interaction visibly local in Feishu.  The
@@ -270,12 +316,12 @@ def dispatch(cfg, body):
         # The CXT 12E4 reports physical dials left-to-right as 2, 3, 1, 0.
         # Owner-confirmed layout: model, effort, volume, zoom.
         if enc == 2:
-            if agent == "codex" and CODEX:
+            if CODEX:
                 return CODEX.cycle_model(clockwise)
             action = "model_next" if clockwise else "model_prev"
             return run_configured_command(cfg, action, agent, body)
         if enc == 3:
-            if agent == "codex" and CODEX:
+            if CODEX:
                 return CODEX.adjust_effort(clockwise)
             action = "effort_up" if clockwise else "effort_down"
             return run_configured_command(cfg, action, agent, body)

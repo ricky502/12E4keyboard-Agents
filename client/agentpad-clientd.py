@@ -64,6 +64,10 @@ AGENT_SLOTS = {
 }
 FUNCTION_SLOTS = {8: "talk", 9: "approve", 10: "reject", 11: "new_task"}
 SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
+# The four encoder switches are exposed by the firmware as key slots 12–15,
+# in physical left-to-right order.  Their rotary reports use the separate
+# (and non-linear) 2,3,1,0 numbering documented in ap_protocol.py.
+ENCODER_PRESS_SLOTS = {12: 2, 13: 3, 14: 1, 15: 0}
 # Bottom row is the keyboard/client power indicator.  It stays at the neutral
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.
@@ -390,6 +394,11 @@ class Daemon:
                 if pkt["pressed"] or action in ("talk", "approve"):
                     self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot,
                                           pressed=bool(pkt["pressed"]))
+            # Encoder presses are one-shot controls; releasing them must not
+            # replay a system action (especially Sleep).
+            if pkt["pressed"] and slot in ENCODER_PRESS_SLOTS:
+                self._forward_command("encoder_press", "codex",
+                                      ENCODER_PRESS_SLOTS[slot])
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")
