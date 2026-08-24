@@ -164,6 +164,33 @@ def run_backup_bottom_hotkey(action, pressed):
         return {"ok": False, "action": "backup_" + action, "err": str(exc)}
 
 
+def run_codex_command_key(action):
+    """Send one-shot Codex command keys to the currently focused app."""
+    sequences = {
+        # Codex decline/cancel is Escape.
+        "reject": [53],
+        # Codex CLI starts a fresh chat with /new followed by Return.
+        "new_task": [44, 45, 14, 13, 36],  # / n e w Return
+    }
+    try:
+        quartz = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        quartz.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
+        quartz.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+        quartz.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        for key_code in sequences[action]:
+            for pressed in (True, False):
+                event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
+                if not event:
+                    raise RuntimeError("could not create keyboard event")
+                quartz.CGEventPost(0, event)
+                cf.CFRelease(event)
+        return {"ok": True, "action": action}
+    except OSError as exc:
+        return {"ok": False, "action": action, "err": str(exc)}
+
+
 def run_configured_command(cfg, action, agent, body):
     template = cfg.get("commands", {}).get(action)
     if not template:
@@ -206,6 +233,8 @@ def dispatch(cfg, body):
         return run_backup_bottom_hotkey("talk", body.get("pressed", True))
     if action == "approve":
         return run_backup_bottom_hotkey("approve", body.get("pressed", True))
+    if action in {"reject", "new_task"}:
+        return run_codex_command_key(action)
     target = cfg.get("targets", {}).get(agent, {})
     if target.get("kind") == "feishu" and action in {"new_task", "approve", "reject"}:
         # Keep every remote-Agent interaction visibly local in Feishu.  The
