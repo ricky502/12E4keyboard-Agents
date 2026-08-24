@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Per-machine runtime data and credentials
+config.json
+*.log
+Library/
+
+# Do not publish exported keyboard/VIA settings that may contain personal mappings
+SaveFile_*.json

@@ -1,0 +1,14 @@
+{
+  "bind": "127.0.0.1",
+  "port": 8125,
+  "token": "",
+  "commands": {
+    "approve": ["/path/to/adapter", "approve", "{agent}"],
+    "reject": ["/path/to/adapter", "reject", "{agent}"],
+    "new_task": ["/path/to/adapter", "new-task", "{agent}"],
+    "effort_up": ["/path/to/adapter", "effort", "{agent}", "up"],
+    "effort_down": ["/path/to/adapter", "effort", "{agent}", "down"],
+    "model_next": ["/path/to/adapter", "model", "{agent}", "next"],
+    "model_prev": ["/path/to/adapter", "model", "{agent}", "prev"]
+  }
+}
