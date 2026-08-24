@@ -117,7 +117,7 @@ def load_image(path):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v6_backup_with_volume.hex")
+    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v7_system_controls.hex")
     rev8_hex = os.path.join(here, "firmware", "cxt_labs_cxt12e4_D&M_Rev8_0530.hex")
     target = rev8_hex if "--rev8" in sys.argv else agentpad_hex
     no_launch = "--no-launch" in sys.argv
