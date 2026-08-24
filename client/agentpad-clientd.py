@@ -31,6 +31,7 @@ import argparse
 import ctypes
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -241,6 +242,12 @@ class Daemon:
         self._next_reconnect_scan = 0.0
         self.selected_agent = 0
         self._press_times = {}
+        # Raw-HID reads must never wait for a slow local app integration.
+        # Commands run off the keyboard I/O thread so the panel remains
+        # responsive while Codex refreshes its model catalogue.
+        self._command_queue = queue.Queue(maxsize=64)
+        threading.Thread(target=self._command_worker, daemon=True,
+                         name="agentpad-command-forwarder").start()
 
     # ---- 状态 -> 灯 ----
     def set_state(self, slot: int, state: str, task_id=None, updated_at=None, source=None) -> str:
@@ -426,15 +433,34 @@ class Daemon:
                 "task_id": self.state_meta.get(self.selected_agent, {}).get("task_id"),
                 **extra}
         try:
-            import urllib.request
-            headers = {"Content-Type": "application/json"}
-            command_token = self.cfg.get("command_token") or ""
-            if command_token:
-                headers["X-Agentpad-Token"] = command_token
-            req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
-            urllib.request.urlopen(req, timeout=2).read()
-        except Exception as e:
-            log(f"⚠️ command_forward 失败: {e}")
+            self._command_queue.put_nowait((url, body))
+        except queue.Full:
+            # Preserve the physical panel's responsiveness.  A very fast
+            # rotation can safely drop a surplus detent rather than freezing
+            # all subsequent keys behind an unavailable local app.
+            log("⚠️ command queue 满，丢弃一个过快的旋钮事件")
+
+    def _command_worker(self):
+        """Forward commands without blocking the HID heartbeat/event pump."""
+        import urllib.request
+        while not self._stop.is_set():
+            try:
+                url, body = self._command_queue.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            try:
+                headers = {"Content-Type": "application/json"}
+                command_token = self.cfg.get("command_token") or ""
+                if command_token:
+                    headers["X-Agentpad-Token"] = command_token
+                req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+                # Model list initialization can take several seconds on first
+                # use; waiting here is harmless because this is a worker.
+                urllib.request.urlopen(req, timeout=25).read()
+            except Exception as e:
+                log(f"⚠️ command_forward {body.get('action', '?')} 失败: {e}")
+            finally:
+                self._command_queue.task_done()
 
     def health(self):
         now = time.time()

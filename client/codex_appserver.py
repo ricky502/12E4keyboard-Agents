@@ -27,36 +27,41 @@ class CodexAppServer:
         self._next_id = 1
         self._responses = queue.Queue()
         self._reader = None
+        # The JSON-RPC transport has one response stream.  Serializing calls
+        # prevents rapid encoder turns from consuming each other's replies.
+        self._rpc_lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
         self.on_state = on_state
 
     def start(self):
-        if self.proc and self.proc.poll() is None:
-            return
-        # launchd deliberately starts Agentpad with a minimal PATH. The Codex
-        # npm entry point uses `#!/usr/bin/env node`, so expose the locally
-        # installed Node runtime explicitly when this is a background service.
-        env = os.environ.copy()
-        node_dirs = ["/opt/homebrew/bin", "/usr/local/bin"]
-        path_entries = env.get("PATH", "").split(":")
-        env["PATH"] = ":".join([p for p in node_dirs if p not in path_entries] + path_entries)
-        self.proc = subprocess.Popen(
-            [self.codex_bin, "app-server", "--stdio"],
-            cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
-        self._reader = threading.Thread(target=self._read_loop, daemon=True)
-        self._reader.start()
-        # Current Codex app-server requires the client capability object in
-        # the initialize handshake, even when Agentpad opts into no optional
-        # capabilities. Without it the server can drop the connection before
-        # replying, leaving the model dial unresponsive.
-        try:
-            self.call("initialize", {"clientInfo": {
-                "name": "agentpad", "title": "Agentpad", "version": "0.1"
-            }, "capabilities": {}})
-        except Exception as exc:
-            self.close()
-            raise RuntimeError(f"Codex app-server initialization failed: {exc}") from exc
-        self.notify("initialized", {})
+        with self._lifecycle_lock:
+            if self.proc and self.proc.poll() is None:
+                return
+            # launchd deliberately starts Agentpad with a minimal PATH. The Codex
+            # npm entry point uses `#!/usr/bin/env node`, so expose the locally
+            # installed Node runtime explicitly when this is a background service.
+            env = os.environ.copy()
+            node_dirs = ["/opt/homebrew/bin", "/usr/local/bin"]
+            path_entries = env.get("PATH", "").split(":")
+            env["PATH"] = ":".join([p for p in node_dirs if p not in path_entries] + path_entries)
+            self.proc = subprocess.Popen(
+                [self.codex_bin, "app-server", "--stdio"],
+                cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
+            self._reader = threading.Thread(target=self._read_loop, daemon=True)
+            self._reader.start()
+            # Current Codex app-server requires the client capability object in
+            # the initialize handshake, even when Agentpad opts into no optional
+            # capabilities. Without it the server can drop the connection before
+            # replying, leaving the model dial unresponsive.
+            try:
+                self.call("initialize", {"clientInfo": {
+                    "name": "agentpad", "title": "Agentpad", "version": "0.1"
+                }, "capabilities": {}})
+            except Exception as exc:
+                self.close()
+                raise RuntimeError(f"Codex app-server initialization failed: {exc}") from exc
+            self.notify("initialized", {})
 
     def _read_loop(self):
         for line in self.proc.stdout:
@@ -99,20 +104,20 @@ class CodexAppServer:
         self._send({"jsonrpc": "2.0", "method": method, "params": params})
 
     def call(self, method, params, timeout=20):
-        request_id = self._next_id
-        self._next_id += 1
-        self._send({"jsonrpc": "2.0", "id": request_id,
-                    "method": method, "params": params})
-        deferred = []
-        while True:
-            msg = self._responses.get(timeout=timeout)
-            if msg.get("id") == request_id:
-                if "error" in msg:
-                    raise RuntimeError(msg["error"])
-                return msg.get("result")
-            deferred.append(msg)
-        # Notifications are intentionally consumed here; a production bridge
-        # will publish them to the Agentpad state pipeline.
+        with self._rpc_lock:
+            request_id = self._next_id
+            self._next_id += 1
+            self._send({"jsonrpc": "2.0", "id": request_id,
+                        "method": method, "params": params})
+            while True:
+                try:
+                    msg = self._responses.get(timeout=timeout)
+                except queue.Empty as exc:
+                    raise RuntimeError(f"Codex app-server timeout: {method}") from exc
+                if msg.get("id") == request_id:
+                    if "error" in msg:
+                        raise RuntimeError(msg["error"])
+                    return msg.get("result")
 
     def _send(self, msg):
         if not self.proc or self.proc.poll() is not None:

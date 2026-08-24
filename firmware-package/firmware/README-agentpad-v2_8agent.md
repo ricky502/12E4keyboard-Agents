@@ -2,6 +2,9 @@
 
 固件文件：`cxt_studio_12e4_agentpad_v2_8agent.hex`
 
+后续修复版：`cxt_studio_12e4_agentpad_v3_encoderfix.hex`。此版本在固件层
+强制截断四个旋钮的原厂媒体音量/RGB 动作，只保留 Agentpad Raw HID 事件。
+
 ## 本版本内容
 
 - 第一排：探春、黛玉、湘云、香菱
