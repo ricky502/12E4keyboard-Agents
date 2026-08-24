@@ -472,7 +472,17 @@ class Daemon:
                 req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
                 # Model list initialization can take several seconds on first
                 # use; waiting here is harmless because this is a worker.
-                urllib.request.urlopen(req, timeout=25).read()
+                with urllib.request.urlopen(req, timeout=25) as response:
+                    reply = json.loads(response.read().decode() or "{}")
+                if reply.get("ok"):
+                    if reply.get("action", "").startswith("volume_"):
+                        level = reply.get("volume")
+                        suffix = f" → {level}%" if level is not None else ""
+                        log(f"✓ 第三个旋钮：{reply['action']}{suffix}")
+                    else:
+                        log(f"✓ command_forward {reply.get('action', body.get('action', '?'))}")
+                else:
+                    log(f"⚠️ command_forward {body.get('action', '?')} 未执行: {reply}")
             except Exception as e:
                 log(f"⚠️ command_forward {body.get('action', '?')} 失败: {e}")
             finally:

@@ -154,10 +154,27 @@ def sleep_computer():
 
 
 def local_volume(clockwise):
-    direction = "+ 5" if clockwise else "- 5"
-    return run_local_applescript(
-        f'set volume output volume ((output volume of (get volume settings)) {direction})',
+    """Adjust volume without reintroducing QMK's global media-key fallback.
+
+    The firmware deliberately no longer emits KC_VOLU/KC_VOLD, because that
+    made every encoder alter volume.  Return the resulting percentage so the
+    client can make this otherwise silent local action observable.
+    """
+    delta = 5 if clockwise else -5
+    result = run_local_applescript(
+        "set currentVolume to output volume of (get volume settings)\n"
+        f"set nextVolume to currentVolume + ({delta})\n"
+        "if nextVolume > 100 then set nextVolume to 100\n"
+        "if nextVolume < 0 then set nextVolume to 0\n"
+        "set volume output volume nextVolume\n"
+        "return nextVolume",
         "volume_up" if clockwise else "volume_down")
+    if result["ok"]:
+        try:
+            result["volume"] = int(result["stdout"].strip())
+        except ValueError:
+            pass
+    return result
 
 
 def run_local_applescript(script, action):
