@@ -245,9 +245,15 @@ class Daemon:
         # Raw-HID reads must never wait for a slow local app integration.
         # Commands run off the keyboard I/O thread so the panel remains
         # responsive while Codex refreshes its model catalogue.
-        self._command_queue = queue.Queue(maxsize=64)
-        threading.Thread(target=self._command_worker, daemon=True,
-                         name="agentpad-command-forwarder").start()
+        # Codex model discovery can take seconds.  It must never queue ahead
+        # of volume, zoom, play/pause, or the physical function keys.
+        self._command_queues = {
+            "codex": queue.Queue(maxsize=1),
+            "local": queue.Queue(maxsize=32),
+        }
+        for lane, command_queue in self._command_queues.items():
+            threading.Thread(target=self._command_worker, args=(command_queue,),
+                             daemon=True, name=f"agentpad-command-{lane}").start()
 
     # ---- 状态 -> 灯 ----
     def set_state(self, slot: int, state: str, task_id=None, updated_at=None, source=None) -> str:
@@ -432,20 +438,30 @@ class Daemon:
                 "selected_slot": self.selected_agent,
                 "task_id": self.state_meta.get(self.selected_agent, {}).get("task_id"),
                 **extra}
+        # Keep slow model/effort RPC isolated.  A spin may produce dozens of
+        # detents, but only the in-flight + one latest desired setting are
+        # useful; system controls retain their own immediate lane.
+        lane = "codex" if action == "encoder" and source in (2, 3) else "local"
         try:
-            self._command_queue.put_nowait((url, body))
+            self._command_queues[lane].put_nowait((url, body))
         except queue.Full:
-            # Preserve the physical panel's responsiveness.  A very fast
-            # rotation can safely drop a surplus detent rather than freezing
-            # all subsequent keys behind an unavailable local app.
-            log("⚠️ command queue 满，丢弃一个过快的旋钮事件")
+            if lane == "codex":
+                # Replace a stale queued Codex detent with the latest one.
+                try:
+                    self._command_queues[lane].get_nowait()
+                    self._command_queues[lane].task_done()
+                    self._command_queues[lane].put_nowait((url, body))
+                except queue.Empty:
+                    pass
+            else:
+                log("⚠️ local command queue 满，丢弃一个过快事件")
 
-    def _command_worker(self):
+    def _command_worker(self, command_queue):
         """Forward commands without blocking the HID heartbeat/event pump."""
         import urllib.request
         while not self._stop.is_set():
             try:
-                url, body = self._command_queue.get(timeout=0.25)
+                url, body = command_queue.get(timeout=0.25)
             except queue.Empty:
                 continue
             try:
@@ -460,7 +476,7 @@ class Daemon:
             except Exception as e:
                 log(f"⚠️ command_forward {body.get('action', '?')} 失败: {e}")
             finally:
-                self._command_queue.task_done()
+                command_queue.task_done()
 
     def health(self):
         now = time.time()
