@@ -383,12 +383,13 @@ class Daemon:
                 if slot in AGENT_SLOTS:
                     self.selected_agent = slot
                     self._forward_command("select_agent", AGENT_SLOTS[slot], slot)
-                elif slot in FUNCTION_SLOTS:
-                    action = self._command_for_slot(slot)
-                    # Bottom controls must always respond.  Their concrete
-                    # adapter action remains local and visible; no message is
-                    # sent to a remote Agent by this daemon.
-                    self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot)
+            if slot in FUNCTION_SLOTS:
+                action = self._command_for_slot(slot)
+                # Option and Return must mirror physical press/release. The
+                # two right function keys remain one-shot actions on press.
+                if pkt["pressed"] or action in ("talk", "approve"):
+                    self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot,
+                                          pressed=bool(pkt["pressed"]))
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")

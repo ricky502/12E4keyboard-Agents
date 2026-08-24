@@ -137,15 +137,15 @@ def run_local_applescript(script, action):
         return {"ok": False, "action": action, "err": str(e)}
 
 
-def run_backup_bottom_hotkey(action):
-    """Replay the two left bottom-row shortcuts from the owner's VIA backup."""
-    mappings = {
-        # S(A(LWIN(SWIN(KC_4))))
-        "talk": (21, (1 << 17) | (1 << 19) | (1 << 20)),
-        # C(S(LWIN(SWIN(KC_X))))
-        "approve": (7, (1 << 17) | (1 << 18) | (1 << 20)),
-    }
-    key_code, flags = mappings[action]
+def run_backup_bottom_hotkey(action, pressed):
+    """Replay the two left bottom-row keys from the owner's VIA backup.
+
+    The physical voice key is Option and must preserve press/release state;
+    the approval key is Return. Quartz avoids a background osascript waiting
+    on an Automation consent dialog.
+    """
+    mappings = {"talk": 58, "approve": 36}  # macOS Option, Return
+    key_code = mappings[action]
     try:
         quartz = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
         quartz.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
@@ -154,14 +154,12 @@ def run_backup_bottom_hotkey(action):
         quartz.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
         cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
         cf.CFRelease.argtypes = [ctypes.c_void_p]
-        for pressed in (True, False):
-            event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
-            if not event:
-                raise RuntimeError("could not create keyboard event")
-            quartz.CGEventSetFlags(event, flags)
-            quartz.CGEventPost(0, event)
-            cf.CFRelease(event)
-        return {"ok": True, "action": "backup_" + action}
+        event = quartz.CGEventCreateKeyboardEvent(None, key_code, bool(pressed))
+        if not event:
+            raise RuntimeError("could not create keyboard event")
+        quartz.CGEventPost(0, event)  # kCGHIDEventTap
+        cf.CFRelease(event)
+        return {"ok": True, "action": "backup_" + action, "pressed": bool(pressed)}
     except OSError as exc:
         return {"ok": False, "action": "backup_" + action, "err": str(exc)}
 
@@ -205,9 +203,9 @@ def dispatch(cfg, body):
             return open_target(target)
         return open_target(target)
     if action == "talk":
-        return run_backup_bottom_hotkey("talk")
+        return run_backup_bottom_hotkey("talk", body.get("pressed", True))
     if action == "approve":
-        return run_backup_bottom_hotkey("approve")
+        return run_backup_bottom_hotkey("approve", body.get("pressed", True))
     target = cfg.get("targets", {}).get(agent, {})
     if target.get("kind") == "feishu" and action in {"new_task", "approve", "reject"}:
         # Keep every remote-Agent interaction visibly local in Feishu.  The
