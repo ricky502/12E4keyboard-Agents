@@ -166,20 +166,30 @@ def run_backup_bottom_hotkey(action, pressed):
 
 def run_codex_command_key(action):
     """Send one-shot Codex command keys to the currently focused app."""
-    sequences = {
-        # Codex decline/cancel is Escape.
-        "reject": [53],
-        # Codex CLI starts a fresh chat with /new followed by Return.
-        "new_task": [44, 45, 14, 13, 36],  # / n e w Return
-    }
     try:
         quartz = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
         quartz.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
         quartz.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
         quartz.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        quartz.CGEventKeyboardSetUnicodeString.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ushort)]
         cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
         cf.CFRelease.argtypes = [ctypes.c_void_p]
-        for key_code in sequences[action]:
+        if action == "new_task":
+            # Inject text as Unicode, not physical key codes: Chinese IMEs map
+            # the physical slash key to 、, while Unicode reliably yields /new.
+            text = "/new"
+            chars = (ctypes.c_ushort * len(text))(*(ord(ch) for ch in text))
+            event = quartz.CGEventCreateKeyboardEvent(None, 0, True)
+            if not event:
+                raise RuntimeError("could not create Unicode keyboard event")
+            quartz.CGEventKeyboardSetUnicodeString(event, len(text), chars)
+            quartz.CGEventPost(0, event)
+            cf.CFRelease(event)
+            time.sleep(0.08)
+            sequence = [36]  # Return, sent only after /new has arrived.
+        else:
+            sequence = [53]  # Escape = Codex decline/cancel.
+        for key_code in sequence:
             for pressed in (True, False):
                 event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
                 if not event:
