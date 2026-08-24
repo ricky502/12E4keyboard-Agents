@@ -7,6 +7,7 @@ unless an explicit, local command template is configured.
 """
 
 import argparse
+import ctypes
 import json
 import os
 import shlex
@@ -136,6 +137,35 @@ def run_local_applescript(script, action):
         return {"ok": False, "action": action, "err": str(e)}
 
 
+def run_backup_bottom_hotkey(action):
+    """Replay the two left bottom-row shortcuts from the owner's VIA backup."""
+    mappings = {
+        # S(A(LWIN(SWIN(KC_4))))
+        "talk": (21, (1 << 17) | (1 << 19) | (1 << 20)),
+        # C(S(LWIN(SWIN(KC_X))))
+        "approve": (7, (1 << 17) | (1 << 18) | (1 << 20)),
+    }
+    key_code, flags = mappings[action]
+    try:
+        quartz = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        quartz.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
+        quartz.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+        quartz.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_ulonglong]
+        quartz.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        for pressed in (True, False):
+            event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
+            if not event:
+                raise RuntimeError("could not create keyboard event")
+            quartz.CGEventSetFlags(event, flags)
+            quartz.CGEventPost(0, event)
+            cf.CFRelease(event)
+        return {"ok": True, "action": "backup_" + action}
+    except OSError as exc:
+        return {"ok": False, "action": "backup_" + action, "err": str(exc)}
+
+
 def run_configured_command(cfg, action, agent, body):
     template = cfg.get("commands", {}).get(action)
     if not template:
@@ -175,15 +205,9 @@ def dispatch(cfg, body):
             return open_target(target)
         return open_target(target)
     if action == "talk":
-        # In v1 the PTT key only focuses the selected conversation. Feishu
-        # itself handles recording/transcription, so this daemon needs neither
-        # microphone nor accessibility permission.
-        target = cfg.get("targets", {}).get(agent)
-        if not target:
-            return {"ok": False, "err": "unknown agent", "agent": agent}
-        if agent == "claude-vscode":
-            return open_target(target)
-        return open_target(target)
+        return run_backup_bottom_hotkey("talk")
+    if action == "approve":
+        return run_backup_bottom_hotkey("approve")
     target = cfg.get("targets", {}).get(agent, {})
     if target.get("kind") == "feishu" and action in {"new_task", "approve", "reject"}:
         # Keep every remote-Agent interaction visibly local in Feishu.  The

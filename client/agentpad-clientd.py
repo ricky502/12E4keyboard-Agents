@@ -385,13 +385,10 @@ class Daemon:
                     self._forward_command("select_agent", AGENT_SLOTS[slot], slot)
                 elif slot in FUNCTION_SLOTS:
                     action = self._command_for_slot(slot)
-                    selected_state = self.states.get(self.selected_agent, "off")
-                    # Approval/rejection are gated locally and only become a
-                    # local Feishu UI action when the selected Agent asks.
-                    if action in ("approve", "reject") and selected_state != "needs_input":
-                        log(f"⏭ {action} ignored: {AGENT_SLOTS.get(self.selected_agent)} is {selected_state}")
-                    else:
-                        self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot)
+                    # Bottom controls must always respond.  Their concrete
+                    # adapter action remains local and visible; no message is
+                    # sent to a remote Agent by this daemon.
+                    self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot)
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")
