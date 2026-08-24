@@ -32,10 +32,10 @@ DEFAULT_CONFIG = {
         "xiangling": {"kind": "feishu", "app_id": "cli_aafd607dfd78dcd8"},
         "baochai": {"kind": "feishu", "app_id": "cli_a935e72632f85cc6"},
         "yinger": {"kind": "feishu", "app_id": "cli_a9633fc1823cdcdd"},
-        # ChatGPT registers the ``codex://`` scheme on macOS. It opens the
-        # native Codex surface directly; there is no separate “Codex Monitor”
-        # application to launch.
-        "codex": {"kind": "uri", "uri": "codex://"},
+        # The local Codex desktop client is packaged as ChatGPT on this Mac.
+        # Launch the actual application rather than relying on a deep link
+        # which macOS can accept without foregrounding a window.
+        "codex": {"kind": "local", "app": "ChatGPT"},
         "claude-vscode": {"kind": "local", "app": "Visual Studio Code"},
     },
     "commands": {},
