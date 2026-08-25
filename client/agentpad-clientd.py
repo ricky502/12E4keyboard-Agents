@@ -336,6 +336,12 @@ class Daemon:
         """Map the four bottom keys to stable adapter action names."""
         return FUNCTION_SLOTS.get(slot, "select_agent")
 
+    def acknowledge_completion(self, slot: int):
+        """A press on a green Agent key acknowledges that completed task."""
+        if slot in AGENT_SLOTS and self.states[slot] == "complete":
+            result = self.set_state(slot, "idle", source="key-acknowledged")
+            log(f"✓ 已确认完成 {SLOT_AGENTS[slot]} -> 白灯 ({result})")
+
     # ---- 心跳: PING/PONG + 事件泵 + 断线重连 ----
     def heartbeat(self):
         while not self._stop.is_set():
@@ -398,6 +404,7 @@ class Daemon:
             if pkt["pressed"]:
                 self._press_times[slot] = time.monotonic()
                 if slot in AGENT_SLOTS:
+                    self.acknowledge_completion(slot)
                     self.selected_agent = slot
                     self._forward_command("select_agent", AGENT_SLOTS[slot], slot)
             if slot in FUNCTION_SLOTS:
