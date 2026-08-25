@@ -417,7 +417,9 @@ class Daemon:
             # Restored firmware emits the owner's original native shortcuts:
             # Option / Return / Copy / Paste.  Do not duplicate them here.
             if pkt["pressed"] and slot in ENCODER_PRESS_SLOTS:
-                log(f"⏺ encoder press {ENCODER_PRESS_SLOTS[slot]} (native backup mapping)")
+                encoder = ENCODER_PRESS_SLOTS[slot]
+                log(f"⏺ encoder press {encoder} (local system action)")
+                self._forward_command("encoder_press", source=encoder)
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")
