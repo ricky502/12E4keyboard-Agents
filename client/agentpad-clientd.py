@@ -65,10 +65,10 @@ AGENT_SLOTS = {
 }
 FUNCTION_SLOTS = {8: "talk", 9: "approve", 10: "reject", 11: "new_task"}
 SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
-# The four encoder switches are exposed by the firmware as key slots 12–15,
-# in physical left-to-right order.  Their rotary reports use the separate
-# (and non-linear) 2,3,1,0 numbering documented in ap_protocol.py.
-ENCODER_PRESS_SLOTS = {12: 2, 13: 3, 14: 1, 15: 0}
+# The four rotary switches are wired in a different order from their rotary
+# reports.  Physical buttons one and two were verified on this 12E4 as slots
+# 14 and 15, respectively; use their intended local system actions.
+ENCODER_PRESS_SLOTS = {12: 1, 13: 0, 14: 2, 15: 3}
 # Bottom row is the keyboard/client power indicator.  It stays at the neutral
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.
