@@ -14,12 +14,16 @@ import urllib.request
 CODEX_LOG_DB = "/Users/ricky/.codex/logs_2.sqlite"
 AGENTPAD_STATE_URL = "http://127.0.0.1:8124/state"
 POLL_SECONDS = 0.75
-QUIET_SECONDS = 6.0
+# A real Desktop turn can pause while a tool, browser, or model stream is
+# waiting.  Do not turn a working key green for a brief logging gap.
+QUIET_SECONDS = 60.0
 ACTIVITY_TARGETS = (
     "codex_core::session::turn",
+    "codex_core::session::handlers",
     "codex_core::stream_events_utils",
     "codex_core::tools::parallel",
     "codex_core::session::world_state",
+    "codex_http_client::client",
 )
 
 
