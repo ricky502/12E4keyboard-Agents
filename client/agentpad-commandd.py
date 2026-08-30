@@ -80,6 +80,17 @@ def load_config(path):
     return cfg
 
 
+def safe_config_summary(cfg):
+    """Expose routing readiness without leaking tokens, URIs or commands."""
+    return {
+        "targets": {
+            name: {"kind": target.get("kind"), "configured": bool(target)}
+            for name, target in cfg.get("targets", {}).items()
+        },
+        "configured_command_actions": sorted(cfg.get("commands", {}).keys()),
+    }
+
+
 def open_target(target):
     kind = target.get("kind")
     if kind == "uri" and target.get("uri"):
@@ -375,7 +386,15 @@ def make_handler(cfg):
         def do_GET(self):
             if self.path == "/health":
                 self.reply(200, {"ok": True, "service": "agentpad-commandd",
-                                 "time": int(time.time())})
+                                 "time": int(time.time()),
+                                 **safe_config_summary(cfg)})
+            elif self.path == "/doctor":
+                targets = safe_config_summary(cfg)["targets"]
+                missing = [name for name, target in targets.items()
+                           if not target["configured"] or not target["kind"]]
+                self.reply(200, {"ok": not missing, "service": "agentpad-commandd",
+                                 "targets": targets, "missing_targets": missing,
+                                 "configured_command_actions": safe_config_summary(cfg)["configured_command_actions"]})
             else:
                 self.reply(404, {"ok": False, "err": "not found"})
 

@@ -4,6 +4,31 @@
 > 作用：开机自启的小服务，接收状态并点亮键盘；同时把键盘事件路由给本机/远程 Agent 适配器。
 > 零依赖：不用 brew 不用 pip，只用 macOS 自带 python3 + 包内自带的 libhidapi.dylib。
 
+## 日常诊断（无需刷机）
+
+服务启动后，可用以下两个只读接口检查整条本地链路：
+
+```bash
+curl http://127.0.0.1:8124/doctor
+curl http://127.0.0.1:8124/profile
+```
+
+`/doctor` 会分别报告：12E4 Raw HID 是否在线、命令适配器是否可访问、飞书状态监听状态、过期 Agent 状态和配置档警告。它不会发送飞书消息、不会改变键盘灯，也不会刷写固件。
+
+首次安装后的完整 HID 灯控往返测试仍可运行：
+
+```bash
+python3 agentpad-clientd.py --selftest
+```
+
+该测试会短暂扫描 12 颗灯，应在没有正在执行的重要任务时运行。
+
+## 本地配置档（无需刷机）
+
+将 [panel-profile.example.json](panel-profile.example.json) 中的 `panel_profile` 段合并到 `config.json`，即可改变 8 个 Agent 的实体槽位顺序、底部四个动作顺序和各状态颜色；配置只在本机客户端加载，重启客户端后生效。
+
+`talk` 目前是 **Option 修饰键**，不是语音输入法；本项目没有把任何按键绑定到 macOS 听写或飞书录音。
+
 ## 安装（一条命令）
 
 ```bash

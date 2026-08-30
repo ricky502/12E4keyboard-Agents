@@ -52,7 +52,10 @@ DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
                   "command_token": "", "feishu_local_observer": False,
                   "feishu_status_monitor": False, "feishu_status_app_id": "",
                   "feishu_status_chat_id": "", "thinking_timeout_s": 300,
-                  "terminal_state_timeout_s": 1800}
+                  "terminal_state_timeout_s": 1800,
+                  # Optional, non-secret customization. This only changes
+                  # local routing/presentation; it never reprograms 12E4.
+                  "panel_profile": {}}
 HEARTBEAT_S = 2.0
 MISSES_TILL_OFFLINE = 3
 RECONNECT_SCAN_S = 5.0
@@ -73,6 +76,73 @@ ENCODER_PRESS_SLOTS = {12: 1, 13: 0, 14: 2, 15: 3}
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.
 FUNCTION_ONLINE_STATE = "idle"
+
+
+def apply_panel_profile(cfg: dict) -> list[str]:
+    """Apply safe local presentation/routing overrides from config.json.
+
+    The 12E4 firmware still emits the same numbered slots. A profile can
+    reorder the eight Agent identities and customize RGB meanings without a
+    reflash. Invalid values are ignored individually and returned by /doctor.
+    """
+    profile = cfg.get("panel_profile") or {}
+    warnings = []
+    agents = profile.get("agent_slots")
+    if agents is not None:
+        if (isinstance(agents, list) and len(agents) == 8 and
+                all(isinstance(name, str) and name for name in agents) and
+                len(set(agents)) == 8):
+            AGENT_SLOTS.clear()
+            AGENT_SLOTS.update(enumerate(agents))
+        else:
+            warnings.append("panel_profile.agent_slots 必须是 8 个不重复的 Agent 名称")
+
+    actions = profile.get("function_actions")
+    if actions is not None:
+        expected = {"talk", "approve", "reject", "new_task"}
+        if (isinstance(actions, list) and len(actions) == 4 and
+                set(actions) == expected):
+            FUNCTION_SLOTS.clear()
+            FUNCTION_SLOTS.update({8 + index: action for index, action in enumerate(actions)})
+        else:
+            warnings.append("panel_profile.function_actions 必须恰好包含 talk/approve/reject/new_task")
+
+    colors = profile.get("state_colors")
+    if colors is not None:
+        if not isinstance(colors, dict):
+            warnings.append("panel_profile.state_colors 必须是对象")
+        else:
+            for state, definition in colors.items():
+                if state not in STATE_COLORS:
+                    warnings.append(f"未知状态颜色: {state}")
+                    continue
+                if (not isinstance(definition, dict) or
+                        not isinstance(definition.get("rgb"), list) or
+                        len(definition["rgb"]) != 3 or
+                        not all(isinstance(value, int) and 0 <= value <= 255
+                                for value in definition["rgb"]) or
+                        not isinstance(definition.get("mode", 0), int) or
+                        definition.get("mode", 0) not in (0, 1, 2)):
+                    warnings.append(f"状态颜色 {state} 格式无效")
+                    continue
+                STATE_COLORS[state] = (tuple(definition["rgb"]), definition.get("mode", 0))
+
+    SLOT_AGENTS.clear()
+    SLOT_AGENTS.update({**AGENT_SLOTS, **FUNCTION_SLOTS})
+    return warnings
+
+
+def safe_panel_profile(cfg: dict) -> dict:
+    """Return only non-secret local customization for GET /profile."""
+    return {
+        "agent_slots": [AGENT_SLOTS[slot] for slot in sorted(AGENT_SLOTS)],
+        "function_actions": [FUNCTION_SLOTS[slot] for slot in sorted(FUNCTION_SLOTS)],
+        "state_colors": {
+            state: {"rgb": list(rgb), "mode": mode}
+            for state, (rgb, mode) in STATE_COLORS.items()
+        },
+        "configured": bool(cfg.get("panel_profile")),
+    }
 
 
 def log(*a):
@@ -242,6 +312,7 @@ class Daemon:
         self._next_reconnect_scan = 0.0
         self.selected_agent = 0
         self._press_times = {}
+        self.profile_warnings = []
         # Raw-HID reads must never wait for a slow local app integration.
         # Commands run off the keyboard I/O thread so the panel remains
         # responsive while Codex refreshes its model catalogue.
@@ -514,6 +585,50 @@ class Daemon:
                 "feishu_status_monitor": self.feishu_status_listener.health()
                 if hasattr(self, "feishu_status_listener") else {"enabled": False}}
 
+    def doctor(self):
+        """Read-only diagnosis of each local link in the Agentpad chain."""
+        now = time.time()
+        stale_agents = [SLOT_AGENTS[slot] for slot in AGENT_SLOTS
+                        if self.state_meta[slot]["updated_at"] and
+                        now - self.state_meta[slot]["updated_at"] > STATE_STALE_S]
+        command_check = {"configured": bool(self.cfg.get("command_forward_url")),
+                         "ok": False}
+        endpoint = self.cfg.get("command_forward_url") or ""
+        if endpoint:
+            try:
+                from urllib.parse import urlsplit, urlunsplit
+                import urllib.request
+                parsed = urlsplit(endpoint)
+                health_url = urlunsplit((parsed.scheme, parsed.netloc, "/health", "", ""))
+                with urllib.request.urlopen(health_url, timeout=0.8) as response:
+                    payload = json.loads(response.read().decode() or "{}")
+                command_check.update({"ok": bool(payload.get("ok")),
+                                      "endpoint": health_url,
+                                      "service": payload.get("service")})
+            except Exception as exc:
+                command_check.update({"endpoint": endpoint, "error": str(exc)[:180]})
+        feishu = (self.feishu_status_listener.health()
+                  if hasattr(self, "feishu_status_listener") else {"enabled": False})
+        return {
+            "ok": self.online and command_check["ok"],
+            "generated_at": int(now),
+            "keyboard": {"online": self.online, "mock": self.link.mock,
+                         "raw_hid_handle_open": bool(self.link.dev) if not self.link.mock else True,
+                         "vid_pid": f"{VID:04X}:{PID:04X}", "protocol": PROTO_VER},
+            "command_adapter": command_check,
+            "feishu_status_listener": feishu,
+            "states": {"stale_agents": stale_agents,
+                       "selected_agent": AGENT_SLOTS.get(self.selected_agent),
+                       "thinking_timeout_s": self.cfg.get("thinking_timeout_s"),
+                       "terminal_state_timeout_s": self.cfg.get("terminal_state_timeout_s")},
+            "profile": safe_panel_profile(self.cfg),
+            "warnings": self.profile_warnings,
+            "next_steps": (["键盘未在线：插回已刷 Agentpad 固件的 12E4，daemon 会自动重连"]
+                           if not self.online else []) +
+                          (["命令适配器未就绪：检查 agentpad-commandd 服务"]
+                           if not command_check["ok"] else []),
+        }
+
     def set_agent_state(self, agent, state, task_id=None, source=None):
         slot = next((s for s, name in AGENT_SLOTS.items() if name == agent), -1)
         if slot < 0:
@@ -574,6 +689,11 @@ def make_handler(daemon: Daemon):
         def do_GET(self):
             if self.path == "/health":
                 self._json(200, daemon.health())
+            elif self.path == "/doctor":
+                self._json(200, daemon.doctor())
+            elif self.path == "/profile":
+                self._json(200, {"ok": True, "profile": safe_panel_profile(daemon.cfg),
+                                 "warnings": daemon.profile_warnings})
             else:
                 self._json(404, {"ok": False, "err": "not found"})
 
@@ -693,7 +813,11 @@ def main():
     cfg = load_config()
     if args.port:
         cfg["port"] = args.port
+    profile_warnings = apply_panel_profile(cfg)
+    for warning in profile_warnings:
+        log(f"⚠️ 配置档: {warning}")
     d = Daemon(link, cfg)
+    d.profile_warnings = profile_warnings
     from feishu_status_listener import FeishuStatusListener
     d.feishu_status_listener = FeishuStatusListener(cfg, d.set_agent_state, log)
     if not link.open():
