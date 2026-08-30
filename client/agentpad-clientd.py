@@ -28,6 +28,7 @@ config.json (首次自动生成, 可手改):
 """
 
 import argparse
+import copy
 import ctypes
 import json
 import os
@@ -41,6 +42,7 @@ from ctypes import (POINTER, Structure, byref, c_char_p, c_int, c_ushort,
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+UI_DIR = os.path.join(HERE, "ui")
 sys.path.insert(0, HERE)
 from ap_protocol import (LED_COUNT, PID, PROTO_VER, RAW_USAGE, RAW_USAGE_PAGE,
                          STATE_COLORS, VID, Virtual12E4, clear_all, parse,
@@ -76,44 +78,34 @@ ENCODER_PRESS_SLOTS = {12: 1, 13: 0, 14: 2, 15: 3}
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.
 FUNCTION_ONLINE_STATE = "idle"
+DEFAULT_AGENT_SLOTS = dict(AGENT_SLOTS)
+DEFAULT_FUNCTION_SLOTS = dict(FUNCTION_SLOTS)
+DEFAULT_STATE_COLORS = dict(STATE_COLORS)
 
 
-def apply_panel_profile(cfg: dict) -> list[str]:
-    """Apply safe local presentation/routing overrides from config.json.
-
-    The 12E4 firmware still emits the same numbered slots. A profile can
-    reorder the eight Agent identities and customize RGB meanings without a
-    reflash. Invalid values are ignored individually and returned by /doctor.
-    """
-    profile = cfg.get("panel_profile") or {}
+def validate_panel_profile(profile) -> list[str]:
+    """Validate profile input before changing any live keyboard routing."""
+    if not isinstance(profile, dict):
+        return ["panel_profile 必须是对象"]
     warnings = []
     agents = profile.get("agent_slots")
-    if agents is not None:
-        if (isinstance(agents, list) and len(agents) == 8 and
-                all(isinstance(name, str) and name for name in agents) and
-                len(set(agents)) == 8):
-            AGENT_SLOTS.clear()
-            AGENT_SLOTS.update(enumerate(agents))
-        else:
-            warnings.append("panel_profile.agent_slots 必须是 8 个不重复的 Agent 名称")
-
+    if agents is not None and not (
+            isinstance(agents, list) and len(agents) == 8 and
+            all(isinstance(name, str) and name for name in agents) and
+            len(set(agents)) == 8):
+        warnings.append("panel_profile.agent_slots 必须是 8 个不重复的 Agent 名称")
     actions = profile.get("function_actions")
-    if actions is not None:
-        expected = {"talk", "approve", "reject", "new_task"}
-        if (isinstance(actions, list) and len(actions) == 4 and
-                set(actions) == expected):
-            FUNCTION_SLOTS.clear()
-            FUNCTION_SLOTS.update({8 + index: action for index, action in enumerate(actions)})
-        else:
-            warnings.append("panel_profile.function_actions 必须恰好包含 talk/approve/reject/new_task")
-
+    if actions is not None and not (
+            isinstance(actions, list) and len(actions) == 4 and
+            set(actions) == {"talk", "approve", "reject", "new_task"}):
+        warnings.append("panel_profile.function_actions 必须恰好包含 talk/approve/reject/new_task")
     colors = profile.get("state_colors")
     if colors is not None:
         if not isinstance(colors, dict):
             warnings.append("panel_profile.state_colors 必须是对象")
         else:
             for state, definition in colors.items():
-                if state not in STATE_COLORS:
+                if state not in DEFAULT_STATE_COLORS:
                     warnings.append(f"未知状态颜色: {state}")
                     continue
                 if (not isinstance(definition, dict) or
@@ -124,8 +116,42 @@ def apply_panel_profile(cfg: dict) -> list[str]:
                         not isinstance(definition.get("mode", 0), int) or
                         definition.get("mode", 0) not in (0, 1, 2)):
                     warnings.append(f"状态颜色 {state} 格式无效")
-                    continue
-                STATE_COLORS[state] = (tuple(definition["rgb"]), definition.get("mode", 0))
+    return warnings
+
+
+def apply_panel_profile(cfg: dict) -> list[str]:
+    """Apply safe local presentation/routing overrides from config.json.
+
+    The 12E4 firmware still emits the same numbered slots. A profile can
+    reorder the eight Agent identities and customize RGB meanings without a
+    reflash. Invalid values are ignored individually and returned by /doctor.
+    """
+    profile = cfg.get("panel_profile") or {}
+    warnings = validate_panel_profile(profile)
+    AGENT_SLOTS.clear()
+    AGENT_SLOTS.update(DEFAULT_AGENT_SLOTS)
+    FUNCTION_SLOTS.clear()
+    FUNCTION_SLOTS.update(DEFAULT_FUNCTION_SLOTS)
+    STATE_COLORS.clear()
+    STATE_COLORS.update(DEFAULT_STATE_COLORS)
+    if warnings:
+        SLOT_AGENTS.clear()
+        SLOT_AGENTS.update({**AGENT_SLOTS, **FUNCTION_SLOTS})
+        return warnings
+    agents = profile.get("agent_slots")
+    if agents is not None:
+        AGENT_SLOTS.clear()
+        AGENT_SLOTS.update(enumerate(agents))
+
+    actions = profile.get("function_actions")
+    if actions is not None:
+        FUNCTION_SLOTS.clear()
+        FUNCTION_SLOTS.update({8 + index: action for index, action in enumerate(actions)})
+
+    colors = profile.get("state_colors")
+    if colors is not None:
+        for state, definition in colors.items():
+            STATE_COLORS[state] = (tuple(definition["rgb"]), definition.get("mode", 0))
 
     SLOT_AGENTS.clear()
     SLOT_AGENTS.update({**AGENT_SLOTS, **FUNCTION_SLOTS})
@@ -313,6 +339,7 @@ class Daemon:
         self.selected_agent = 0
         self._press_times = {}
         self.profile_warnings = []
+        self.config_path = os.path.join(HERE, "config.json")
         # Raw-HID reads must never wait for a slow local app integration.
         # Commands run off the keyboard I/O thread so the panel remains
         # responsive while Codex refreshes its model catalogue.
@@ -629,6 +656,34 @@ class Daemon:
                            if not command_check["ok"] else []),
         }
 
+    def update_profile(self, profile):
+        """Persist a UI edit atomically, then repaint without a reflash."""
+        warnings = validate_panel_profile(profile)
+        if warnings:
+            return {"ok": False, "warnings": warnings}
+        with self._lock:
+            updated = copy.deepcopy(self.cfg)
+            updated["panel_profile"] = profile
+            warnings = apply_panel_profile(updated)
+            if warnings:
+                return {"ok": False, "warnings": warnings}
+            encoded = json.dumps(updated, ensure_ascii=False, indent=2) + "\n"
+            temporary = self.config_path + ".tmp"
+            try:
+                with open(temporary, "w", encoding="utf-8") as handle:
+                    handle.write(encoded)
+                os.replace(temporary, self.config_path)
+            except OSError as exc:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+                return {"ok": False, "warnings": [f"保存配置失败: {exc}"]}
+            self.cfg = updated
+            self.profile_warnings = []
+        self.boot_paint()
+        return {"ok": True, "profile": safe_panel_profile(self.cfg)}
+
     def set_agent_state(self, agent, state, task_id=None, source=None):
         slot = next((s for s, name in AGENT_SLOTS.items() if name == agent), -1)
         if slot < 0:
@@ -687,6 +742,20 @@ def make_handler(daemon: Daemon):
                 return {}
 
         def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                page = os.path.join(UI_DIR, "index.html")
+                try:
+                    with open(page, "rb") as handle:
+                        body = handle.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                except OSError:
+                    self._json(404, {"ok": False, "err": "editor UI not installed"})
+                    return
             if self.path == "/health":
                 self._json(200, daemon.health())
             elif self.path == "/doctor":
@@ -703,7 +772,11 @@ def make_handler(daemon: Daemon):
                 self._json(401, {"ok": False, "err": "bad token"})
                 return
             body = self._body(raw)
-            if self.path == "/state":
+            if self.path == "/profile":
+                profile = body.get("panel_profile", body)
+                result = daemon.update_profile(profile)
+                self._json(200 if result.get("ok") else 400, result)
+            elif self.path == "/state":
                 slot = daemon.resolve_slot(body)
                 state = str(body.get("state", ""))
                 if slot < 0:
@@ -785,8 +858,8 @@ def selftest(link: KeyboardLink) -> int:
 
 # --------------------------------------------------------------------------
 
-def load_config() -> dict:
-    p = os.path.join(HERE, "config.json")
+def load_config(path=None) -> dict:
+    p = path or os.path.join(HERE, "config.json")
     if not os.path.exists(p):
         with open(p, "w") as f:
             json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=1)
@@ -804,19 +877,22 @@ def main():
     ap.add_argument("--mock", action="store_true", help="虚拟键盘 (无硬件演示)")
     ap.add_argument("--selftest", action="store_true", help="通信+灯控自检后退出")
     ap.add_argument("--port", type=int, help="覆盖 config 端口")
+    ap.add_argument("--config", help="配置文件路径（默认 client/config.json）")
     args = ap.parse_args()
 
     link = KeyboardLink(mock=args.mock)
     if args.selftest:
         sys.exit(selftest(link))
 
-    cfg = load_config()
+    config_path = args.config or os.path.join(HERE, "config.json")
+    cfg = load_config(config_path)
     if args.port:
         cfg["port"] = args.port
     profile_warnings = apply_panel_profile(cfg)
     for warning in profile_warnings:
         log(f"⚠️ 配置档: {warning}")
     d = Daemon(link, cfg)
+    d.config_path = config_path
     d.profile_warnings = profile_warnings
     from feishu_status_listener import FeishuStatusListener
     d.feishu_status_listener = FeishuStatusListener(cfg, d.set_agent_state, log)
