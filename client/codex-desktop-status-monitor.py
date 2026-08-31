@@ -14,9 +14,11 @@ import urllib.request
 CODEX_LOG_DB = "/Users/ricky/.codex/logs_2.sqlite"
 AGENTPAD_STATE_URL = "http://127.0.0.1:8124/state"
 POLL_SECONDS = 0.75
-# A real Desktop turn can pause while a tool, browser, or model stream is
-# waiting.  Do not turn a working key green for a brief logging gap.
-QUIET_SECONDS = 60.0
+# Codex Desktop can legitimately go quiet while a tool, browser, or model
+# stream is waiting.  Log silence is only a fallback signal, not a true turn
+# completion event, so keep the LED blue for a conservative window rather
+# than presenting a false green "complete" state mid-task.
+QUIET_SECONDS = 300.0
 ACTIVITY_TARGETS = (
     "codex_core::session::turn",
     "codex_core::session::handlers",
