@@ -18,7 +18,11 @@ POLL_SECONDS = 0.75
 # stream is waiting.  Log silence is only a fallback signal, not a true turn
 # completion event, so keep the LED blue for a conservative window rather
 # than presenting a false green "complete" state mid-task.
-QUIET_SECONDS = 300.0
+QUIET_SECONDS = 1800.0
+# The main client expires a thinking state after five minutes unless it is
+# refreshed.  Send a lightweight heartbeat while a local Codex turn is known
+# to be active, so a long-running tool cannot silently turn the key white.
+THINKING_HEARTBEAT_SECONDS = 45.0
 ACTIVITY_TARGETS = (
     "codex_core::session::turn",
     "codex_core::session::handlers",
@@ -78,6 +82,7 @@ def main():
     last_id = 0
     current_state = "idle"
     last_activity = 0.0
+    last_publish = 0.0
     active_thread = None
     publish("idle")  # clear any stale status left by an older integration.
 
@@ -96,10 +101,17 @@ def main():
                 if current_state != "thinking":
                     publish("thinking", active_thread)
                     current_state = "thinking"
+                    last_publish = last_activity
 
-            if current_state == "thinking" and time.monotonic() - last_activity >= QUIET_SECONDS:
-                publish("complete", active_thread)
-                current_state = "complete"
+            now = time.monotonic()
+            if current_state == "thinking":
+                if now - last_activity >= QUIET_SECONDS:
+                    publish("complete", active_thread)
+                    current_state = "complete"
+                    last_publish = now
+                elif now - last_publish >= THINKING_HEARTBEAT_SECONDS:
+                    publish("thinking", active_thread)
+                    last_publish = now
         except sqlite3.Error:
             if connection is not None:
                 connection.close()
