@@ -85,7 +85,7 @@ GET  /health       → 在线状态+全部槽位
 
 ### 香菱：企业微信智能机器人
 
-香菱的 Agent 键会打开本机「企业微信」，不再跳转飞书。企业微信的 Bot ID 与 Secret 只保存在 macOS 登录钥匙串：服务名 `Agentpad WeCom AI Bot`，账号分别为 `xiangling.bot_id` 与 `xiangling.secret`；不写入配置、源码或版本库。企业微信 API 的 Bot ID/Secret 用于其长连接机器人服务，不是桌面客户端的公开聊天链接。
+香菱的 Agent 键会打开本机「企业微信」，不再跳转飞书。企业微信的 Bot ID 与 Secret 只保存在 macOS 登录钥匙串：服务名 `Agentpad WeCom AI Bot`，账号分别为 `xiangling.bot_id` 与 `xiangling.secret`；不写入配置、源码或版本库。企业微信 API 的 Bot ID/Secret 用于香菱 Agent 的唯一长连接服务，不是桌面客户端的公开聊天链接。香菱的工作状态仍须镜像到既有的 Agentpad 飞书状态群，供键盘统一显示。
 
 键盘事件会通过 `command_forward_url` 转给命令适配器，格式示例：
 
