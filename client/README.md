@@ -81,7 +81,7 @@ GET  /health       → 在线状态+全部槽位
 
 - agent 名：`tanchun / daiyu / xiangyun / xiangling / yinger / codex / claude-vscode / baochai`
 - state：`idle / thinking / complete / needs_input / error / off`
-- `task_id`、`updated_at`（Unix 秒）和 `source` 可选。`/health` 会返回每个 Agent 的这些信息。为避免旧任务状态长期遗留，`thinking` 超过 5 分钟、完成/异常/等待输入超过 30 分钟且没有新事件时，会自动恢复为待机。
+- `task_id`、`updated_at`（Unix 秒）和 `source` 可选。`/health` 会返回每个 Agent 的这些信息。为避免短暂断线后灯态长期遗留，`thinking` 超过 2 小时、完成/异常/等待输入超过 30 分钟且没有新事件时，会自动恢复为待机；远端 Agent 仍应在长任务中定期重发 `thinking`。
 
 ### 香菱：企业微信智能机器人
 

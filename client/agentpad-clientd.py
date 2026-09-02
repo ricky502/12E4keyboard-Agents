@@ -53,7 +53,10 @@ DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
                   "command_forward_url": "http://127.0.0.1:8125/command",
                   "command_token": "", "feishu_local_observer": False,
                   "feishu_status_monitor": False, "feishu_status_app_id": "",
-                  "feishu_status_chat_id": "", "thinking_timeout_s": 300,
+                  # A remote Agent can be quiet while a long tool or subtask
+                  # runs.  Status heartbeats remain preferred, while this is
+                  # the local safety net against a premature white LED.
+                  "feishu_status_chat_id": "", "thinking_timeout_s": 7200,
                   "terminal_state_timeout_s": 1800,
                   # Optional, non-secret customization. This only changes
                   # local routing/presentation; it never reprograms 12E4.
