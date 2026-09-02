@@ -83,6 +83,10 @@ GET  /health       → 在线状态+全部槽位
 - state：`idle / thinking / complete / needs_input / error / off`
 - `task_id`、`updated_at`（Unix 秒）和 `source` 可选。`/health` 会返回每个 Agent 的这些信息。为避免旧任务状态长期遗留，`thinking` 超过 5 分钟、完成/异常/等待输入超过 30 分钟且没有新事件时，会自动恢复为待机。
 
+### 香菱：企业微信智能机器人
+
+香菱的 Agent 键会打开本机「企业微信」，不再跳转飞书。企业微信的 Bot ID 与 Secret 只保存在 macOS 登录钥匙串：服务名 `Agentpad WeCom AI Bot`，账号分别为 `xiangling.bot_id` 与 `xiangling.secret`；不写入配置、源码或版本库。企业微信 API 的 Bot ID/Secret 用于其长连接机器人服务，不是桌面客户端的公开聊天链接。
+
 键盘事件会通过 `command_forward_url` 转给命令适配器，格式示例：
 
 ```json

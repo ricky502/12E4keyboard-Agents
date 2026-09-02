@@ -30,7 +30,9 @@ DEFAULT_CONFIG = {
         "tanchun": {"kind": "feishu", "app_id": "cli_aad5ad30b7b95bfb"},
         "daiyu": {"kind": "feishu", "app_id": "cli_a90727456ff9dcd3"},
         "xiangyun": {"kind": "feishu", "app_id": "cli_a914dfbd52785cc2"},
-        "xiangling": {"kind": "feishu", "app_id": "cli_aafd607dfd78dcd8"},
+        # Xiangling is an Enterprise WeChat AI bot.  Its Bot ID and Secret
+        # belong in the macOS Keychain, never in this file or command config.
+        "xiangling": {"kind": "wecom", "app": "企业微信"},
         "baochai": {"kind": "feishu", "app_id": "cli_a935e72632f85cc6"},
         "yinger": {"kind": "feishu", "app_id": "cli_a9633fc1823cdcdd"},
         # The local Codex desktop client is packaged as ChatGPT on this Mac.
@@ -107,6 +109,14 @@ def open_target(target):
         subprocess.Popen(["open", uri], stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
         return {"ok": True, "opened": uri}
+    if kind == "wecom" and target.get("app"):
+        # Enterprise WeChat's AI Bot API authenticates the bot's service, not
+        # a desktop deep link.  Selecting this Agent therefore opens the
+        # locally signed-in Enterprise WeChat client without persisting or
+        # exposing the bot credentials.
+        subprocess.Popen(["open", "-a", target["app"]], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        return {"ok": True, "opened_app": target["app"]}
     if kind == "local" and target.get("app"):
         subprocess.Popen(["open", "-a", target["app"]], stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
