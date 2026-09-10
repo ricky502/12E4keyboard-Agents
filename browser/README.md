@@ -8,4 +8,7 @@ Chrome 加载 `agentpad-playback-adapter` 后，四号旋钮进入播放速度�
 
 适用 YouTube 和 B 站网页视频。普通页面或未进入播放模式时，四号旋钮仍然调文字大小。
 
+播放速度模式直接发送扩展专用的 `[` / `]` 事件，不再逐次查询 Chrome
+当前网址；因此连续旋转时不会出现数秒延迟。
+
 安装方式：Chrome 打开 `chrome://extensions`，开启“开发者模式”，选择“加载已解压的扩展程序”，选中本目录下的 `agentpad-playback-adapter` 文件夹。

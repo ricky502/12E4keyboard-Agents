@@ -139,34 +139,17 @@ def local_zoom(clockwise):
         "zoom_in" if clockwise else "zoom_out")
 
 
-def active_browser_url():
-    """Return Chrome's active-tab URL, without reading page contents."""
-    script = '''tell application "Google Chrome"
-    if (count of windows) is 0 then return ""
-    return URL of active tab of front window
-end tell'''
-    result = run_local_applescript(script, "browser_url")
-    return result.get("stdout", "").strip() if result.get("ok") else ""
-
-
 def browser_playback_step(clockwise):
-    """Send the Agentpad speed key to a supported frontmost video page."""
-    url = active_browser_url()
-    if "youtube.com/" not in url and "youtu.be/" not in url and "bilibili.com/" not in url:
-        return {"ok": True, "action": "playback_unsupported", "url": url}
-    # The bundled page adapter handles both sites with [ / ] and changes the
-    # HTML5 video's playbackRate by 0.25.  The keys are deliberately sent to
-    # the frontmost Chrome window, never to a remote service.
-    is_youtube = "youtube.com/" in url or "youtu.be/" in url
-    key_code = ("47" if clockwise else "43") if is_youtube else ("30" if clockwise else "33")
-    key_suffix = " using {shift down}" if is_youtube else ""
-    script = ('tell application "Google Chrome" to activate\n'
-              'delay 0.05\n'
-              f'tell application "System Events" to tell process "Google Chrome" to key code {key_code}{key_suffix}')
-    result = run_local_applescript(
-        script, "playback_speed_up" if clockwise else "playback_speed_down")
-    result["url"] = url
-    return result
+    """Send the adapter's universal [ / ] speed key without a browser query.
+
+    Asking Chrome for its active URL takes several seconds on some Macs.  The
+    content script is already restricted to YouTube and Bilibili, so it is
+    both safe and much faster to post its shortcut directly to the frontmost
+    application.  Unsupported pages simply ignore the event.
+    """
+    action = "playback_speed_up" if clockwise else "playback_speed_down"
+    key_code = 30 if clockwise else 33  # ANSI ] / [
+    return post_key_code(key_code, action)
 
 
 def toggle_playback_mode():
@@ -254,6 +237,29 @@ def run_local_applescript(script, action):
                 "stdout": proc.stdout[-500:], "stderr": proc.stderr[-500:]}
     except (OSError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "action": action, "err": str(e)}
+
+
+def post_key_code(key_code, action):
+    """Post one unmodified macOS key press through Quartz."""
+    try:
+        quartz = ctypes.CDLL(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        quartz.CGEventCreateKeyboardEvent.argtypes = [
+            ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
+        quartz.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+        quartz.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        cf = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        for pressed in (True, False):
+            event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
+            if not event:
+                raise RuntimeError("could not create keyboard event")
+            quartz.CGEventPost(0, event)
+            cf.CFRelease(event)
+        return {"ok": True, "action": action}
+    except (OSError, RuntimeError) as exc:
+        return {"ok": False, "action": action, "err": str(exc)}
 
 
 def run_backup_bottom_hotkey(action, pressed):
