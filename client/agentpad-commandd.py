@@ -140,17 +140,11 @@ def local_zoom(clockwise):
 
 
 def active_browser_url():
-    """Return the frontmost Chrome URL, without reading page contents."""
-    script = '''tell application "System Events"
-    set frontName to name of first process whose frontmost is true
-end tell
-if frontName is "Google Chrome" then
-    tell application "Google Chrome"
-        return URL of active tab of front window
-    end tell
-else
-    return ""
-end if'''
+    """Return Chrome's active-tab URL, without reading page contents."""
+    script = '''tell application "Google Chrome"
+    if (count of windows) is 0 then return ""
+    return URL of active tab of front window
+end tell'''
     result = run_local_applescript(script, "browser_url")
     return result.get("stdout", "").strip() if result.get("ok") else ""
 
@@ -165,7 +159,7 @@ def browser_playback_step(clockwise):
     # the frontmost Chrome window, never to a remote service.
     key_code = "30" if clockwise else "33"  # ] / [ on the US Mac layout
     result = run_local_applescript(
-        f'tell application "System Events" to key code {key_code}',
+        f'tell application "System Events" to tell process "Google Chrome" to key code {key_code}',
         "playback_speed_up" if clockwise else "playback_speed_down")
     result["url"] = url
     return result
