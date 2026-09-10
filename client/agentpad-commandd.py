@@ -65,6 +65,7 @@ CODEX = (CodexAppServer(codex_bin="/Users/ricky/.npm-global/bin/codex",
 # restored after a service restart, and no keyboard setting needs to be saved.
 KEYBOARD_LIGHTS_ON = True
 KEYBOARD_ON_BRIGHTNESS = 160
+PLAYBACK_MODE = False
 
 
 def load_config(path):
@@ -136,6 +137,45 @@ def local_zoom(clockwise):
     return run_local_applescript(
         f'tell application "System Events" to key code {key_code} using command down',
         "zoom_in" if clockwise else "zoom_out")
+
+
+def active_browser_url():
+    """Return the frontmost Chrome URL, without reading page contents."""
+    script = '''tell application "System Events"
+    set frontName to name of first process whose frontmost is true
+end tell
+if frontName is "Google Chrome" then
+    tell application "Google Chrome"
+        return URL of active tab of front window
+    end tell
+else
+    return ""
+end if'''
+    result = run_local_applescript(script, "browser_url")
+    return result.get("stdout", "").strip() if result.get("ok") else ""
+
+
+def browser_playback_step(clockwise):
+    """Send the Agentpad speed key to a supported frontmost video page."""
+    url = active_browser_url()
+    if "youtube.com/" not in url and "youtu.be/" not in url and "bilibili.com/" not in url:
+        return {"ok": True, "action": "playback_unsupported", "url": url}
+    # The bundled page adapter handles both sites with [ / ] and changes the
+    # HTML5 video's playbackRate by 0.25.  The keys are deliberately sent to
+    # the frontmost Chrome window, never to a remote service.
+    key_code = "30" if clockwise else "33"  # ] / [ on the US Mac layout
+    result = run_local_applescript(
+        f'tell application "System Events" to key code {key_code}',
+        "playback_speed_up" if clockwise else "playback_speed_down")
+    result["url"] = url
+    return result
+
+
+def toggle_playback_mode():
+    global PLAYBACK_MODE
+    PLAYBACK_MODE = not PLAYBACK_MODE
+    return {"ok": True, "action": "playback_mode",
+            "enabled": PLAYBACK_MODE}
 
 
 def local_play_pause():
@@ -332,7 +372,7 @@ def dispatch(cfg, body):
         if enc == 1:
             return local_play_pause()
         if enc == 0:
-            return {"ok": True, "action": "zoom_press_unassigned"}
+            return toggle_playback_mode()
         return {"ok": False, "err": "unknown encoder press", "encoder": enc}
     target = cfg.get("targets", {}).get(agent, {})
     if target.get("kind") == "feishu" and action in {"new_task", "approve", "reject"}:
@@ -371,7 +411,8 @@ def dispatch(cfg, body):
         if enc == 1:
             return local_volume(clockwise)
         if enc == 0:
-            return local_zoom(clockwise)
+            return (browser_playback_step(clockwise)
+                    if PLAYBACK_MODE else local_zoom(clockwise))
         return {"ok": False, "err": "unknown encoder", "encoder": enc}
     return run_configured_command(cfg, action, agent, body)
 
