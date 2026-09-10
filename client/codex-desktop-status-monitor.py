@@ -1,43 +1,35 @@
 #!/usr/bin/env python3
-"""Drive Agentpad's Codex LED from local Codex Desktop activity.
+"""Drive Agentpad's Codex LED from local Codex Desktop turn state.
 
-This monitor reads only record metadata from Codex's local log database.  It
-never reads prompts, responses, tool arguments, or any feedback-log body.
+Only lifecycle metadata is read. Prompts, responses, and tool arguments are
+never inspected.
 """
 
 import json
+import os
+import re
 import sqlite3
 import time
 import urllib.request
 
 
-CODEX_LOG_DB = "/Users/ricky/.codex/logs_2.sqlite"
+CODEX_HOME = os.path.expanduser("~/.codex")
+TURN_DB = os.path.join(CODEX_HOME, "thread_history_1.sqlite")
+LOG_DB = os.path.join(CODEX_HOME, "logs_2.sqlite")
 AGENTPAD_STATE_URL = "http://127.0.0.1:8124/state"
-POLL_SECONDS = 0.75
-# Codex Desktop can legitimately go quiet while a tool, browser, or model
-# stream is waiting.  Log silence is only a fallback signal, not a true turn
-# completion event, so keep the LED blue for a conservative window rather
-# than presenting a false green "complete" state mid-task.
-QUIET_SECONDS = 1800.0
-# The main client expires a thinking state after five minutes unless it is
-# refreshed.  Send a lightweight heartbeat while a local Codex turn is known
-# to be active, so a long-running tool cannot silently turn the key white.
+POLL_SECONDS = 0.5
 THINKING_HEARTBEAT_SECONDS = 45.0
-ACTIVITY_TARGETS = (
-    "codex_core::session::turn",
-    "codex_core::session::handlers",
-    "codex_core::stream_events_utils",
-    "codex_core::tools::parallel",
-    "codex_core::session::world_state",
-    "codex_http_client::client",
-)
+# Ignore abandoned inProgress rows left by a much older Codex build or crash.
+# A live owner process is still required, so this is only a broad safety cap.
+MAX_TURN_AGE_SECONDS = 7 * 24 * 60 * 60
+PID_PATTERN = re.compile(r"(?:^|:)pid:(\d+)(?::|$)")
 
 
 def publish(state, task_id=None):
     payload = {
         "agent": "codex",
         "state": state,
-        "source": "codex-desktop-log-monitor",
+        "source": "codex-desktop-turn-monitor",
     }
     if task_id:
         payload["task_id"] = task_id
@@ -55,67 +47,95 @@ def publish(state, task_id=None):
         pass
 
 
-def connect():
-    return sqlite3.connect(
-        "file:%s?mode=ro" % CODEX_LOG_DB,
-        uri=True,
-        timeout=1,
-    )
+def connect(path):
+    return sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=1)
 
 
-def newest_id(connection):
-    return connection.execute("SELECT COALESCE(MAX(id), 0) FROM logs").fetchone()[0]
+def process_is_alive(process_uuid):
+    if not process_uuid:
+        return False
+    match = PID_PATTERN.search(process_uuid)
+    if not match:
+        return False
+    try:
+        os.kill(int(match.group(1)), 0)
+        return True
+    except PermissionError:
+        # Sandboxed Codex processes may be visible but not signalable.
+        return True
+    except (OSError, ValueError):
+        return False
 
 
-def activity_after(connection, last_id):
-    placeholders = ",".join("?" for _ in ACTIVITY_TARGETS)
-    query = (
-        "SELECT id, thread_id FROM logs "
-        "WHERE id > ? AND thread_id IS NOT NULL AND target IN (%s) "
-        "ORDER BY id" % placeholders
-    )
-    return connection.execute(query, (last_id, *ACTIVITY_TARGETS)).fetchall()
+def active_turns(turn_connection, log_connection):
+    cutoff = int(time.time()) - MAX_TURN_AGE_SECONDS
+    rows = turn_connection.execute(
+        "SELECT thread_id, turn_id, started_at FROM thread_turns "
+        "WHERE status = 'inProgress' AND started_at >= ? "
+        "ORDER BY started_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    active = []
+    for thread_id, turn_id, started_at in rows:
+        owner = log_connection.execute(
+            "SELECT process_uuid FROM logs "
+            "WHERE thread_id = ? AND process_uuid IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        if owner and process_is_alive(owner[0]):
+            active.append((thread_id, turn_id, started_at))
+    return active
 
 
 def main():
-    connection = None
-    last_id = 0
-    current_state = "idle"
-    last_activity = 0.0
+    turn_connection = None
+    log_connection = None
+    current_state = None
+    active_signature = ()
+    last_task_id = None
     last_publish = 0.0
-    active_thread = None
-    publish("idle")  # clear any stale status left by an older integration.
 
     while True:
         try:
-            if connection is None:
-                connection = connect()
-                # Establish a baseline: historical conversations are not active work.
-                last_id = newest_id(connection)
+            if turn_connection is None:
+                turn_connection = connect(TURN_DB)
+            if log_connection is None:
+                log_connection = connect(LOG_DB)
 
-            rows = activity_after(connection, last_id)
-            if rows:
-                last_id = rows[-1][0]
-                active_thread = rows[-1][1]
-                last_activity = time.monotonic()
-                if current_state != "thinking":
-                    publish("thinking", active_thread)
-                    current_state = "thinking"
-                    last_publish = last_activity
-
+            active = active_turns(turn_connection, log_connection)
+            signature = tuple(sorted(turn_id for _, turn_id, _ in active))
             now = time.monotonic()
-            if current_state == "thinking":
-                if now - last_activity >= QUIET_SECONDS:
-                    publish("complete", active_thread)
-                    current_state = "complete"
+
+            if active:
+                newest_task_id = active[0][1]
+                if current_state != "thinking" or signature != active_signature:
+                    publish("thinking", newest_task_id)
+                    current_state = "thinking"
+                    active_signature = signature
+                    last_task_id = newest_task_id
                     last_publish = now
                 elif now - last_publish >= THINKING_HEARTBEAT_SECONDS:
-                    publish("thinking", active_thread)
+                    publish("thinking", newest_task_id)
                     last_publish = now
+            elif current_state == "thinking":
+                publish("complete", last_task_id)
+                current_state = "complete"
+                active_signature = ()
+                last_publish = now
+            elif current_state is None:
+                # Clear stale status left behind if the monitor was not running.
+                publish("idle")
+                current_state = "idle"
+                last_publish = now
         except sqlite3.Error:
-            if connection is not None:
-                connection.close()
-            connection = None
+            if turn_connection is not None:
+                turn_connection.close()
+            if log_connection is not None:
+                log_connection.close()
+            turn_connection = None
+            log_connection = None
             time.sleep(2)
             continue
 

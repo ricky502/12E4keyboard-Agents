@@ -3,10 +3,13 @@
 set -euo pipefail
 LABEL="com.agents.agentpad-client"
 CMD_LABEL="com.agents.agentpad-commandd"
+CODEX_LABEL="com.agents.agentpad-codex-status-monitor"
 DST="$HOME/Library/AgentpadClient"
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || launchctl unload -w "$HOME/Library/LaunchAgents/$LABEL.plist" 2>/dev/null || true
 launchctl bootout "gui/$UID/$CMD_LABEL" 2>/dev/null || launchctl unload -w "$HOME/Library/LaunchAgents/$CMD_LABEL.plist" 2>/dev/null || true
+launchctl bootout "gui/$UID/$CODEX_LABEL" 2>/dev/null || launchctl unload -w "$HOME/Library/LaunchAgents/$CODEX_LABEL.plist" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
 rm -f "$HOME/Library/LaunchAgents/$CMD_LABEL.plist"
+rm -f "$HOME/Library/LaunchAgents/$CODEX_LABEL.plist"
 rm -rf "$DST"
-echo "✅ 已卸载 (日志保留在 ~/Library/Logs/agentpad-client.log 和 ~/Library/Logs/agentpad-commandd.log)"
+echo "✅ 已卸载 (日志保留在 ~/Library/Logs/agentpad-*.log)"
