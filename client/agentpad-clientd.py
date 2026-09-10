@@ -76,7 +76,10 @@ SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
 # The four rotary switches are wired in a different order from their rotary
 # reports.  Physical buttons one and two were verified on this 12E4 as slots
 # 14 and 15, respectively; use their intended local system actions.
-ENCODER_PRESS_SLOTS = {12: 1, 13: 0, 14: 2, 15: 3}
+# The CXT 12E4 reports each dial's press on the same logical slot as its
+# matching rotation event.  The previous swapped table made dial four press
+# trigger play/pause while its rotation controlled zoom.
+ENCODER_PRESS_SLOTS = {12: 0, 13: 1, 14: 2, 15: 3}
 # Bottom row is the keyboard/client power indicator.  It stays at the neutral
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.
