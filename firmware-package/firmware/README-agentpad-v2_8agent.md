@@ -1,9 +1,9 @@
 # Agentpad v2：8-Agent 固件
 
-固件文件：`cxt_studio_12e4_agentpad_v2_8agent.hex`
+当前推荐固件：`cxt_studio_12e4_agentpad_v4_encoderfix_verified.hex`
 
-后续修复版：`cxt_studio_12e4_agentpad_v3_encoderfix.hex`。此版本在固件层
-强制截断四个旋钮的原厂媒体音量/RGB 动作，只保留 Agentpad Raw HID 事件。
+v3 在固件层强制截断四个旋钮的原厂媒体音量/RGB 动作，只保留 Agentpad
+Raw HID 事件；v4 是在此基础上完成验证的推荐版本。
 
 已验证版本：`cxt_studio_12e4_agentpad_v4_encoderfix_verified.hex`。该版本
 修复了 v3 中旋钮回调未实际阻止 QMK 默认音量分支的问题；应优先使用此文件。
@@ -14,7 +14,7 @@
 - 第二排：莺儿、Codex、VSCode Claude、宝钗
 - 第三排：语音、批准、拒绝、新任务
 - 四个旋钮全部启用并通过 Raw HID `ENC_EVENT` 上报
-- 禁止 CXT 原生固件层自动修改音量或 RGB，旋钮动作交给本机客户端按配置执行
+- 禁止 CXT 原生固件层自动修改音量、缩放或 RGB，旋钮动作交给本机客户端按配置执行
 - 保留 Raw HID 状态灯、心跳和按键事件协议
 
 ## 当前状态
