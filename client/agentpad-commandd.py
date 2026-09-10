@@ -174,6 +174,11 @@ def browser_playback_step(clockwise):
 def toggle_playback_mode():
     global PLAYBACK_MODE
     PLAYBACK_MODE = not PLAYBACK_MODE
+    label = "播放速度" if PLAYBACK_MODE else "文字大小"
+    subprocess.Popen([
+        "osascript", "-e",
+        f'display notification "四号旋钮：{label}模式" with title "Agentpad"',
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"ok": True, "action": "playback_mode",
             "enabled": PLAYBACK_MODE}
 
