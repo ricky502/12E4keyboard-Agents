@@ -160,9 +160,6 @@ def browser_playback_step(clockwise):
     is_youtube = "youtube.com/" in url or "youtu.be/" in url
     key_code = ("47" if clockwise else "43") if is_youtube else ("30" if clockwise else "33")
     key_suffix = " using {shift down}" if is_youtube else ""
-    script = ("tell application \\\"Google Chrome\\\" to activate\\n"
-              "delay 0.05\\n"
-              f"tell application \\\"System Events\\\" to tell process \\\"Google Chrome\\\" to key code {key_code}")
     script = ('tell application "Google Chrome" to activate\n'
               'delay 0.05\n'
               f'tell application "System Events" to tell process "Google Chrome" to key code {key_code}{key_suffix}')

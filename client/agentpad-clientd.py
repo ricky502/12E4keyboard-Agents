@@ -527,8 +527,18 @@ class Daemon:
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")
-            # The firmware performs the backup JSON mapping directly.  This
-            # prevents the former Codex model/effort routing from returning.
+            # Rotation is a raw HID event, not a key event.  Forward it to
+            # commandd so the local adapter can select the active behavior
+            # (brightness/seek/volume/zoom, or playback speed for dial four).
+            # Without this call the firmware's original native zoom shortcut
+            # remains the only observable effect and playback mode can never
+            # intercept the rotation.
+            self._forward_command(
+                "encoder",
+                agent=AGENT_SLOTS.get(self.selected_agent),
+                source=int(pkt["enc"]),
+                clockwise=bool(pkt["cw"]),
+            )
 
     def _forward_key(self, ev):
         url = self.cfg.get("key_forward_url") or ""
