@@ -158,9 +158,14 @@ def browser_playback_step(clockwise):
     # HTML5 video's playbackRate by 0.25.  The keys are deliberately sent to
     # the frontmost Chrome window, never to a remote service.
     key_code = "30" if clockwise else "33"  # ] / [ on the US Mac layout
+    script = ("tell application \\\"Google Chrome\\\" to activate\\n"
+              "delay 0.05\\n"
+              f"tell application \\\"System Events\\\" to tell process \\\"Google Chrome\\\" to key code {key_code}")
+    script = ('tell application "Google Chrome" to activate\n'
+              'delay 0.05\n'
+              f'tell application "System Events" to tell process "Google Chrome" to key code {key_code}')
     result = run_local_applescript(
-        f'tell application "System Events" to tell process "Google Chrome" to key code {key_code}',
-        "playback_speed_up" if clockwise else "playback_speed_down")
+        script, "playback_speed_up" if clockwise else "playback_speed_down")
     result["url"] = url
     return result
 
