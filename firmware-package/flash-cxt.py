@@ -8,6 +8,7 @@ bootloader: Atmel FLIP AVR8 方言魔改版（官方工具箱=QMK Toolbox换皮+
 
 用法:
   python3 flash-cxt.py                # 刷 agentpad 固件 (默认)
+  python3 flash-cxt.py --skip-erase   # 已擦除现场直接写入（恢复用）
   python3 flash-cxt.py --rev8         # 刷回原厂 Rev.8 (恢复用)
   python3 flash-cxt.py --no-launch    # 只写不启动
 
@@ -117,15 +118,14 @@ def load_image(path):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    # Use the verified raw-event firmware.  The v7 system-controls image
-    # keeps QMK's native encoder shortcuts, which duplicates the local
-    # playback/zoom adapter and causes YouTube speed changes to zoom the page.
-    # v4 reports encoder detents over Raw HID only; all four controls remain
-    # implemented by the local Agentpad client.
-    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v4_encoderfix_verified.hex")
+    # Use the freshly rebuilt Raw-HID-only image.  Older v7/v4 images still
+    # contained native encoder keycodes despite their comments, which could
+    # make playback-speed mode zoom the browser at the same time.
+    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v12_rawhid_encoder.hex")
     rev8_hex = os.path.join(here, "firmware", "cxt_labs_cxt12e4_D&M_Rev8_0530.hex")
     target = rev8_hex if "--rev8" in sys.argv else agentpad_hex
     no_launch = "--no-launch" in sys.argv
+    skip_erase = "--skip-erase" in sys.argv
 
     img = load_image(target)
     img = img + b"\xFF" * (APP_SIZE - len(img))
@@ -172,27 +172,38 @@ def main():
         return rc
 
     st, tmo, sd = getstatus()
-    log(f"[st] DFU 初始 status={st} poll={tmo} state={sd} (state=2 才能刷)")
-    if sd != 2:
-        log("⚠️ 状态不在 idle —— 先重插 USB 再跑一次")
+    # This bootloader variant has been observed to report appIDLE (0) while
+    # the device is already in its DFU endpoint.  Treat status=0/state=0 as
+    # usable idle alongside the standard dfuIDLE state=2.
+    log(f"[st] DFU 初始 status={st} state={sd} (idle=0/2)")
+    if st != 0 or sd not in (0, 2):
+        log("⚠️ 状态不在可用 idle —— 先重插 USB 再跑一次")
 
     # --- 1. 擦除 ---
-    rc = dnload([0x04, 0x00, 0xFF])
-    log(f"[erase] [04 00 FF] rc={rc}")
-    if rc != 3:
-        log("❌ 擦除命令被拒（重插 USB 再跑）"); return 4
-    t0 = time.time()
-    while time.time() - t0 < 25:
+    if skip_erase:
+        log("[erase] ⏭️ 跳过（当前设备此前已完成擦除，先复位后直接写入）")
+    else:
+        rc = dnload([0x04, 0x00, 0xFF])
+        log(f"[erase] [04 00 FF] rc={rc}")
+        if rc != 3:
+            log("❌ 擦除命令被拒（重插 USB 再跑）"); return 4
+        t0 = time.time()
+        # The modified bootloader reports state=0 immediately even while the
+        # erase command is still being committed.  Its documented erase
+        # window is up to 20 seconds; do not send the first data packet during
+        # that window or libusb returns a timeout (-7).
+        erase_ready_at = t0 + 20.0
+        while time.time() - t0 < 25:
+            st, tmo, sd = getstatus()
+            if st is None:
+                time.sleep(0.3); continue
+            if time.time() >= erase_ready_at and sd in (0, 2, 10):
+                break
+            time.sleep(max(tmo, 100, 300) / 1000)
         st, tmo, sd = getstatus()
-        if st is None:
-            time.sleep(0.3); continue
-        if sd == 2 or sd == 10:
-            break
-        time.sleep(max(tmo, 100) / 1000)
-    st, tmo, sd = getstatus()
-    log(f"[erase] {'✅' if (st == 0 and sd == 2) else '❌'} status={st} state={sd} 用时{time.time()-t0:.1f}s")
-    if not (st == 0 and sd == 2):
-        return 4
+        log(f"[erase] {'✅' if (st == 0 and sd in (0, 2)) else '❌'} status={st} state={sd} 用时{time.time()-t0:.1f}s")
+        if not (st == 0 and sd in (0, 2)):
+            return 4
 
     # --- 2. 写入 ---
     t0 = time.time()
