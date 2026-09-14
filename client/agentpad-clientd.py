@@ -64,6 +64,9 @@ DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
 HEARTBEAT_S = 2.0
 MISSES_TILL_OFFLINE = 3
 RECONNECT_SCAN_S = 5.0
+# Some 12E4 rotary switches emit a second down/up pair while the switch is
+# settling.  Treat it as one press so toggle actions do not cancel themselves.
+ENCODER_PRESS_DEBOUNCE_S = 0.35
 # 状态超过此时间没有更新，/health 标为 stale。
 STATE_STALE_S = 15 * 60
 
@@ -344,6 +347,7 @@ class Daemon:
         self._next_reconnect_scan = 0.0
         self.selected_agent = 0
         self._press_times = {}
+        self._encoder_press_times = {}
         self.profile_warnings = []
         self.config_path = os.path.join(HERE, "config.json")
         # Raw-HID reads must never wait for a slow local app integration.
@@ -522,8 +526,14 @@ class Daemon:
             # Option / Return / Copy / Paste.  Do not duplicate them here.
             if pkt["pressed"] and slot in ENCODER_PRESS_SLOTS:
                 encoder = ENCODER_PRESS_SLOTS[slot]
-                log(f"⏺ encoder press {encoder} (local system action)")
-                self._forward_command("encoder_press", source=encoder)
+                now = time.monotonic()
+                elapsed = now - self._encoder_press_times.get(slot, 0.0)
+                if elapsed >= ENCODER_PRESS_DEBOUNCE_S:
+                    self._encoder_press_times[slot] = now
+                    log(f"⏺ encoder press {encoder} (local system action)")
+                    self._forward_command("encoder_press", source=encoder)
+                else:
+                    log(f"↷ encoder press {encoder} debounce ({elapsed:.3f}s)")
             self._forward_key(self.key_events[-1])
         elif pkt["t"] == "enc":
             log(f"🎚 enc {pkt['enc']} {'cw' if pkt['cw'] else 'ccw'} layer={pkt['layer']}")
@@ -594,8 +604,18 @@ class Daemon:
                 req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
                 # Model list initialization can take several seconds on first
                 # use; waiting here is harmless because this is a worker.
-                with urllib.request.urlopen(req, timeout=25) as response:
-                    reply = json.loads(response.read().decode() or "{}")
+                reply = None
+                for attempt in range(3):
+                    try:
+                        with urllib.request.urlopen(req, timeout=25) as response:
+                            reply = json.loads(response.read().decode() or "{}")
+                        break
+                    except urllib.error.URLError as exc:
+                        if (attempt >= 2 or
+                                not isinstance(exc.reason, ConnectionRefusedError)):
+                            raise
+                        time.sleep(0.2 * (attempt + 1))
+                reply = reply or {}
                 if reply.get("ok"):
                     if reply.get("action", "").startswith("volume_"):
                         level = reply.get("volume")

@@ -189,12 +189,23 @@ def toggle_keyboard_lights():
 
 
 def sleep_computer():
-    """Request normal macOS sleep only when the owner presses encoder two."""
+    """Turn the displays off when the owner presses encoder two.
+
+    Wait for pmset's result so the adapter never reports a failed request as
+    successful. Keyboard or mouse input wakes the displays normally.
+    """
     try:
-        subprocess.Popen(["pmset", "sleepnow"], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
-        return {"ok": True, "action": "sleep_computer"}
-    except OSError as exc:
+        proc = subprocess.run(
+            ["/usr/bin/pmset", "displaysleepnow"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if proc.returncode:
+            return {"ok": False, "action": "sleep_computer",
+                    "err": (proc.stderr or proc.stdout or
+                            f"pmset exited {proc.returncode}").strip()}
+        return {"ok": True, "action": "sleep_computer",
+                "effect": "display_sleep"}
+    except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "action": "sleep_computer", "err": str(exc)}
 
 
