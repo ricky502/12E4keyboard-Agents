@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
                   # runs.  Status heartbeats remain preferred, while this is
                   # the local safety net against a premature white LED.
                   "feishu_status_chat_id": "", "thinking_timeout_s": 7200,
-                  "feishu_status_self_owner": "",
+                  "feishu_status_self_owners": {},
                   "terminal_state_timeout_s": 1800,
                   # Optional, non-secret customization. This only changes
                   # local routing/presentation; it never reprograms 12E4.
@@ -346,7 +346,7 @@ class Daemon:
         self._misses = 0
         self._lock = threading.Lock()
         self._owner_lock = threading.Lock()
-        self.owner_state = OwnerState(cfg.get("feishu_status_self_owner"))
+        self.owner_state = OwnerState(cfg.get("feishu_status_self_owners"))
         self._owner_agents = set()
         self._stop = threading.Event()
         self._next_reconnect_scan = 0.0

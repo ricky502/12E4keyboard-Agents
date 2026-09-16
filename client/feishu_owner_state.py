@@ -7,8 +7,8 @@ ACTIVE_STATES = {"thinking", "needs_input"}
 
 
 class OwnerState:
-    def __init__(self, self_owner):
-        self.self_owner = self_owner or ""
+    def __init__(self, self_owners):
+        self.self_owners = self_owners if isinstance(self_owners, dict) else {}
         self.tasks = {}
         self.last_terminal = {}
 
@@ -37,11 +37,14 @@ class OwnerState:
         active = [(key, task) for key, task in self.tasks.get(agent, {}).items()
                   if task["state"] in ACTIVE_STATES]
         owners = {task["owner"] for _, task in active if task["owner"]}
-        own = bool(self.self_owner and self.self_owner in owners)
-        other = bool(owners - {self.self_owner}) if self.self_owner else False
-        unknown = any(not task["owner"] for _, task in active)
+        self_owner = self.self_owners.get(agent) or ""
+        own = bool(self_owner and self_owner in owners)
+        other = bool(owners - {self_owner}) if self_owner else False
+        unknown = any(not task["owner"] for _, task in active) or bool(owners and not self_owner)
         if active:
-            if own and (other or unknown):
+            if not self_owner and len(owners) >= 2:
+                state = "thinking_shared"
+            elif own and (other or unknown):
                 state = "thinking_shared"
             elif other and (own or unknown):
                 state = "thinking_shared"

@@ -23,7 +23,7 @@ OTHER = "ou_other"
 
 class OwnerStateTests(unittest.TestCase):
     def setUp(self):
-        self.states = OwnerState(SELF)
+        self.states = OwnerState({"tanchun": SELF, "daiyu": SELF})
 
     def test_self_then_other_then_self_done_then_other_done(self):
         self.assertEqual(self.states.update("tanchun", "thinking", "a", SELF, now=10)["state"], "thinking")
@@ -60,6 +60,11 @@ class OwnerStateTests(unittest.TestCase):
         self.assertIsNone(parse_status('[AGENTPAD] {"agent":"tanchun","state":"thinking",'
                                        '"owner":{"bad":true}}'))
 
+    def test_unmapped_agent_never_mislabels_one_owner_as_other(self):
+        self.assertEqual(self.states.update("xiangyun", "thinking", "a", OTHER, now=10)["state"], "thinking")
+        self.assertTrue(self.states.view("xiangyun")["unknown_active"])
+        self.assertEqual(self.states.update("xiangyun", "thinking", "b", SELF, now=11)["state"], "thinking_shared")
+
     def test_daemon_paints_physical_agent_slot(self):
         class Link:
             mock = True
@@ -70,7 +75,7 @@ class OwnerStateTests(unittest.TestCase):
                 return True
 
         link = Link()
-        daemon = Daemon(link, {"feishu_status_self_owner": SELF})
+        daemon = Daemon(link, {"feishu_status_self_owners": {"tanchun": SELF}})
         daemon.set_agent_state("tanchun", "thinking", "a", owner=SELF)
         self.assertEqual(link.packets[-2][:5], bytes([1, 0, 0, 60, 255]))
         daemon.set_agent_state("tanchun", "thinking", "b", owner=OTHER)
