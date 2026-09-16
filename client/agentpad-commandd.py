@@ -132,11 +132,10 @@ def open_uri(uri):
 
 
 def local_zoom(clockwise):
-    """Send Command + / - to the frontmost local app."""
-    key_code = "24" if clockwise else "27"  # =/+ and - on a US Mac layout
-    return run_local_applescript(
-        f'tell application "System Events" to key code {key_code} using command down',
-        "zoom_in" if clockwise else "zoom_out")
+    """Send Command + / - without launching osascript for every detent."""
+    key_code = 24 if clockwise else 27  # =/+ and - on a US Mac layout
+    return post_key_code(key_code, "zoom_in" if clockwise else "zoom_out",
+                         flags=1 << 20)  # kCGEventFlagMaskCommand
 
 
 def browser_playback_step(clockwise):
@@ -250,8 +249,8 @@ def run_local_applescript(script, action):
         return {"ok": False, "action": action, "err": str(e)}
 
 
-def post_key_code(key_code, action):
-    """Post one unmodified macOS key press through Quartz."""
+def post_key_code(key_code, action, flags=0):
+    """Post one macOS key press through Quartz, with optional modifier flags."""
     try:
         quartz = ctypes.CDLL(
             "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
@@ -259,6 +258,7 @@ def post_key_code(key_code, action):
             ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
         quartz.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
         quartz.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        quartz.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_ulonglong]
         cf = ctypes.CDLL(
             "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
         cf.CFRelease.argtypes = [ctypes.c_void_p]
@@ -266,6 +266,8 @@ def post_key_code(key_code, action):
             event = quartz.CGEventCreateKeyboardEvent(None, key_code, pressed)
             if not event:
                 raise RuntimeError("could not create keyboard event")
+            if flags:
+                quartz.CGEventSetFlags(event, flags)
             quartz.CGEventPost(0, event)
             cf.CFRelease(event)
         return {"ok": True, "action": action}

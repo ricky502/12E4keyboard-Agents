@@ -358,11 +358,13 @@ class Daemon:
         # Raw-HID reads must never wait for a slow local app integration.
         # Commands run off the keyboard I/O thread so the panel remains
         # responsive while Codex refreshes its model catalogue.
-        # Codex model discovery can take seconds.  It must never queue ahead
-        # of volume, zoom, play/pause, or the physical function keys.
+        # Codex model discovery and volume AppleScript can take seconds.
+        # Keep dial four's rotate/press events in their own ordered lane so
+        # neither can delay zoom or reorder a playback-mode toggle.
         self._command_queues = {
             "codex": queue.Queue(maxsize=1),
             "local": queue.Queue(maxsize=32),
+            "zoom": queue.Queue(maxsize=64),
         }
         for lane, command_queue in self._command_queues.items():
             threading.Thread(target=self._command_worker, args=(command_queue,),
@@ -590,7 +592,12 @@ class Daemon:
         # Keep slow model/effort RPC isolated.  A spin may produce dozens of
         # detents, but only the in-flight + one latest desired setting are
         # useful; system controls retain their own immediate lane.
-        lane = "codex" if action == "encoder" and source in (2, 3) else "local"
+        if action in ("encoder", "encoder_press") and source == 0:
+            lane = "zoom"
+        elif action == "encoder" and source in (2, 3):
+            lane = "codex"
+        else:
+            lane = "local"
         try:
             self._command_queues[lane].put_nowait((url, body))
         except queue.Full:
@@ -603,7 +610,7 @@ class Daemon:
                 except queue.Empty:
                     pass
             else:
-                log("⚠️ local command queue 满，丢弃一个过快事件")
+                log(f"⚠️ {lane} command queue 满，丢弃一个过快事件")
 
     def _command_worker(self, command_queue):
         """Forward commands without blocking the HID heartbeat/event pump."""
