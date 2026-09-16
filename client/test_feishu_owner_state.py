@@ -63,7 +63,13 @@ class OwnerStateTests(unittest.TestCase):
     def test_unmapped_agent_never_mislabels_one_owner_as_other(self):
         self.assertEqual(self.states.update("xiangyun", "thinking", "a", OTHER, now=10)["state"], "thinking")
         self.assertTrue(self.states.view("xiangyun")["unknown_active"])
-        self.assertEqual(self.states.update("xiangyun", "thinking", "b", SELF, now=11)["state"], "thinking_shared")
+        self.assertEqual(self.states.update("xiangyun", "thinking", "b", SELF, now=11)["state"], "thinking")
+
+    def test_unknown_owner_does_not_imply_shared(self):
+        self.states.update("tanchun", "thinking", "a", SELF, now=10)
+        self.assertEqual(self.states.update("tanchun", "thinking", "b", now=11)["state"], "thinking")
+        self.states.update("tanchun", "complete", "a", now=12)
+        self.assertEqual(self.states.update("tanchun", "thinking", "c", OTHER, now=13)["state"], "thinking")
 
     def test_daemon_paints_physical_agent_slot(self):
         class Link:

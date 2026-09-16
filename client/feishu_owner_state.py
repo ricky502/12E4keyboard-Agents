@@ -42,15 +42,12 @@ class OwnerState:
         other = bool(owners - {self_owner}) if self_owner else False
         unknown = any(not task["owner"] for _, task in active) or bool(owners and not self_owner)
         if active:
-            if not self_owner and len(owners) >= 2:
+            if own and other:
                 state = "thinking_shared"
-            elif own and (other or unknown):
-                state = "thinking_shared"
-            elif other and (own or unknown):
-                state = "thinking_shared"
-            elif other:
+            elif other and not unknown:
                 state = "thinking_other"
             else:
+                # An unmapped or ownerless task cannot prove who is working.
                 state = "thinking"
             task_id = max(active, key=lambda item: item[1]["updated_at"])[0]
         else:
