@@ -50,7 +50,14 @@ def parse_status(text: str):
     task_id = body.get("task_id")
     if task_id is not None and not isinstance(task_id, (str, int, float)):
         return None
-    return {"agent": body["agent"], "state": body["state"], "task_id": str(task_id) if task_id is not None else None}
+    owner, chat = body.get("owner"), body.get("chat")
+    if owner is not None and (not isinstance(owner, str) or len(owner) > 128):
+        return None
+    if chat is not None and (not isinstance(chat, str) or len(chat) > 128):
+        return None
+    return {"agent": body["agent"], "state": body["state"],
+            "task_id": str(task_id) if task_id is not None else None,
+            "owner": owner or None, "chat": chat or None}
 
 
 class FeishuStatusListener:

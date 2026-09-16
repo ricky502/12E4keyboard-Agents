@@ -47,6 +47,7 @@ sys.path.insert(0, HERE)
 from ap_protocol import (LED_COUNT, PID, PROTO_VER, RAW_USAGE, RAW_USAGE_PAGE,
                          STATE_COLORS, VID, Virtual12E4, clear_all, parse,
                          ping, set_brightness, set_mode, set_slot)
+from feishu_owner_state import OwnerState
 
 DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
                   "bind": "127.0.0.1", "key_forward_url": "",
@@ -57,6 +58,7 @@ DEFAULT_CONFIG = {"port": 8124, "brightness": 160, "token": "",
                   # runs.  Status heartbeats remain preferred, while this is
                   # the local safety net against a premature white LED.
                   "feishu_status_chat_id": "", "thinking_timeout_s": 7200,
+                  "feishu_status_self_owner": "",
                   "terminal_state_timeout_s": 1800,
                   # Optional, non-secret customization. This only changes
                   # local routing/presentation; it never reprograms 12E4.
@@ -343,6 +345,9 @@ class Daemon:
         self._echo = 0
         self._misses = 0
         self._lock = threading.Lock()
+        self._owner_lock = threading.Lock()
+        self.owner_state = OwnerState(cfg.get("feishu_status_self_owner"))
+        self._owner_agents = set()
         self._stop = threading.Event()
         self._next_reconnect_scan = 0.0
         self.selected_agent = 0
@@ -413,9 +418,19 @@ class Daemon:
         now = time.time()
         thinking_ttl = max(30, int(self.cfg.get("thinking_timeout_s", 300)))
         terminal_ttl = max(60, int(self.cfg.get("terminal_state_timeout_s", 1800)))
+        with self._owner_lock:
+            owner_expired = self.owner_state.expire(now, thinking_ttl, terminal_ttl)
+            owner_agents = set(self._owner_agents)
+        for agent, view in owner_expired:
+            slot = next((s for s, name in AGENT_SLOTS.items() if name == agent), -1)
+            if slot >= 0:
+                self.set_state(slot, view["state"], view["task_id"],
+                               source="feishu-owner-timeout")
         expired = []
         with self._lock:
             for slot in AGENT_SLOTS:
+                if AGENT_SLOTS[slot] in owner_agents:
+                    continue
                 state = self.states[slot]
                 updated = self.state_meta[slot].get("updated_at") or 0
                 if not updated or state == "idle":
@@ -447,6 +462,8 @@ class Daemon:
     def acknowledge_completion(self, slot: int):
         """A press on a green Agent key acknowledges that completed task."""
         if slot in AGENT_SLOTS and self.states[slot] == "complete":
+            with self._owner_lock:
+                self.owner_state.last_terminal.pop(AGENT_SLOTS[slot], None)
             result = self.set_state(slot, "idle", source="key-acknowledged")
             log(f"✓ 已确认完成 {SLOT_AGENTS[slot]} -> 白灯 ({result})")
 
@@ -632,6 +649,9 @@ class Daemon:
 
     def health(self):
         now = time.time()
+        with self._owner_lock:
+            owner_activity = {agent: self.owner_state.view(agent)
+                              for agent in self._owner_agents}
         agent_status = {}
         for s in range(LED_COUNT):
             meta = self.state_meta[s]
@@ -643,6 +663,7 @@ class Daemon:
                 "proto": PROTO_VER, "uptime_s": int(time.time() - self.t0),
                 "states": {SLOT_AGENTS.get(s, s): self.states[s] for s in range(LED_COUNT)},
                 "agent_status": agent_status,
+                "feishu_owner_activity": owner_activity,
                 "selected_agent": AGENT_SLOTS.get(self.selected_agent),
                 "last_keys": self.key_events[-8:],
                 "feishu_status_monitor": self.feishu_status_listener.health()
@@ -720,12 +741,19 @@ class Daemon:
         self.boot_paint()
         return {"ok": True, "profile": safe_panel_profile(self.cfg)}
 
-    def set_agent_state(self, agent, state, task_id=None, source=None):
+    def set_agent_state(self, agent, state, task_id=None, source=None,
+                        owner=None, chat=None):
         slot = next((s for s, name in AGENT_SLOTS.items() if name == agent), -1)
         if slot < 0:
             return
-        result = self.set_state(slot, state, task_id=task_id, source=source)
-        log(f"✦ 飞书状态 {agent} -> {state} ({result})")
+        with self._owner_lock:
+            self._owner_agents.add(agent)
+            view = self.owner_state.update(agent, state, task_id, owner, chat)
+        result = self.set_state(slot, view["state"], task_id=view["task_id"],
+                                source=source)
+        log(f"✦ 飞书状态 {agent} {state} -> {view['state']} "
+            f"(活跃任务={view['active_tasks']}, 自己={view['self_active']}, "
+            f"他人={view['other_active']}, 未标记={view['unknown_active']}; {result})")
 
     def observe_feishu_local(self):
         """Read the local Feishu accessibility tree and update only visible hints."""
