@@ -78,13 +78,10 @@ AGENT_SLOTS = {
 }
 FUNCTION_SLOTS = {8: "talk", 9: "approve", 10: "reject", 11: "new_task"}
 SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
-# The four rotary switches are wired in a different order from their rotary
-# reports.  Physical buttons one and two were verified on this 12E4 as slots
-# 14 and 15, respectively; use their intended local system actions.
-# The CXT 12E4 reports each dial's press on the same logical slot as its
-# matching rotation event.  The previous swapped table made dial four press
-# trigger play/pause while its rotation controlled zoom.
-ENCODER_PRESS_SLOTS = {12: 0, 13: 1, 14: 2, 15: 3}
+# Presses arrive as physical matrix slots 12..15, while rotation reports use
+# the board's electrical encoder order.  Match both to the verified physical
+# left-to-right order 2, 3, 1, 0 so each press belongs to its own dial.
+ENCODER_PRESS_SLOTS = {12: 2, 13: 3, 14: 1, 15: 0}
 # Bottom row is the keyboard/client power indicator.  It stays at the neutral
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.
@@ -365,6 +362,7 @@ class Daemon:
             "codex": queue.Queue(maxsize=1),
             "local": queue.Queue(maxsize=32),
             "zoom": queue.Queue(maxsize=64),
+            "keys": queue.Queue(maxsize=64),
         }
         for lane, command_queue in self._command_queues.items():
             threading.Thread(target=self._command_worker, args=(command_queue,),
@@ -592,7 +590,11 @@ class Daemon:
         # Keep slow model/effort RPC isolated.  A spin may produce dozens of
         # detents, but only the in-flight + one latest desired setting are
         # useful; system controls retain their own immediate lane.
-        if action in ("encoder", "encoder_press") and source == 0:
+        if action in ("talk", "approve"):
+            # Option/Return must feel like native keys.  Never put their
+            # down/up pairs behind volume or system-control work.
+            lane = "keys"
+        elif action in ("encoder", "encoder_press") and source == 0:
             lane = "zoom"
         elif action == "encoder" and source in (2, 3):
             lane = "codex"
