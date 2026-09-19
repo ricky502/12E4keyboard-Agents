@@ -78,10 +78,10 @@ AGENT_SLOTS = {
 }
 FUNCTION_SLOTS = {8: "talk", 9: "approve", 10: "reject", 11: "new_task"}
 SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
-# Presses arrive as physical matrix slots 12..15, while rotation reports use
-# the board's electrical encoder order.  Match both to the verified physical
-# left-to-right order 2, 3, 1, 0 so each press belongs to its own dial.
-ENCODER_PRESS_SLOTS = {12: 2, 13: 3, 14: 1, 15: 0}
+# Encoder pushes use matrix wiring that is independent from rotation reports.
+# Verified from this physical board's event log, left-to-right pushes are
+# slots 14, 15, 13, 12 and must invoke light, sleep, play/pause, mode.
+ENCODER_PRESS_SLOTS = {14: 2, 15: 3, 13: 1, 12: 0}
 # Bottom row is the keyboard/client power indicator.  It stays at the neutral
 # idle white whenever this local daemon is running; only the eight Agent keys
 # communicate Agent state.

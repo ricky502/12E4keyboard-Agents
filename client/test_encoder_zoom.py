@@ -72,7 +72,7 @@ class EncoderZoomTests(unittest.TestCase):
 
     def test_encoder_press_slots_follow_physical_dial_order(self):
         self.assertEqual(clientd.ENCODER_PRESS_SLOTS,
-                         {12: 2, 13: 3, 14: 1, 15: 0})
+                         {14: 2, 15: 3, 13: 1, 12: 0})
 
 
 if __name__ == "__main__":
