@@ -45,7 +45,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [0] = LAYOUT(
         KC_NO,   KC_NO,   KC_NO,   KC_NO,
         KC_NO,   KC_NO,   KC_NO,   KC_NO,
-        KC_NO,   KC_NO,   KC_NO,   KC_NO,
+        KC_LALT, KC_ENT,  KC_NO,   KC_NO,
         RM_TOGG, KC_PWR,   KC_MPLY,  LGUI(KC_V)
     )
 };
@@ -110,9 +110,17 @@ bool rgb_matrix_indicators_user(void) {
 }
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    uint8_t slot = record->event.key.row * 4 + record->event.key.col;
+    // Voice and approval must be genuine USB keyboard keys.  Software-made
+    // Option/Enter events are throttled by macOS and make repeated dictation
+    // starts take several seconds.  Do not also report these two over Raw HID,
+    // otherwise the legacy host fallback would emit a duplicate key event.
+    if (slot == 8 || slot == 9) {
+        return true;
+    }
     uint8_t pkt[AP_EPSIZE] = {0};
     pkt[0] = 0x81; // KEY_EVENT
-    pkt[1] = record->event.key.row * 4 + record->event.key.col; // slot 0-15
+    pkt[1] = slot; // slot 0-15
     pkt[2] = record->event.pressed ? 1 : 0;
     pkt[3] = (uint8_t)get_highest_layer(layer_state);
     raw_hid_send(pkt, AP_EPSIZE);

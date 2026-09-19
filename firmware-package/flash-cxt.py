@@ -121,7 +121,7 @@ def main():
     # Use the freshly rebuilt Raw-HID-only image.  Older v7/v4 images still
     # contained native encoder keycodes despite their comments, which could
     # make playback-speed mode zoom the browser at the same time.
-    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v12_rawhid_encoder.hex")
+    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v13_native_bottom_keys.hex")
     rev8_hex = os.path.join(here, "firmware", "cxt_labs_cxt12e4_D&M_Rev8_0530.hex")
     target = rev8_hex if "--rev8" in sys.argv else agentpad_hex
     no_launch = "--no-launch" in sys.argv

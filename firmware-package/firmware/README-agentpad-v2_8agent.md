@@ -1,6 +1,11 @@
 # Agentpad v2：8-Agent 固件
 
-当前推荐固件：`cxt_studio_12e4_agentpad_v12_rawhid_encoder.hex`
+当前推荐固件：`cxt_studio_12e4_agentpad_v13_native_bottom_keys.hex`
+
+v13 在 v12 的 Raw-HID 旋钮和状态灯基础上，将第三排左侧两个键改为
+固件原生 USB 键盘输出：语音键为左 Option，批准键为 Enter。这样 macOS
+不再把它们当软件合成事件，连续使用语音输入时的响应与电脑键盘一致。
+其余主键、旋钮按压和旋转仍通过 Raw HID 交给本机客户端处理。
 
 v3/v4 虽然标注为 Raw HID 版本，但历史源码仍保留了旋钮原生动作。
 v12 已从源码重新编译，并确认四个旋钮回调只发送 Agentpad Raw HID 事件，
