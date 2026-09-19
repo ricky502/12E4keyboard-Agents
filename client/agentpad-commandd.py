@@ -66,6 +66,7 @@ CODEX = (CodexAppServer(codex_bin="/Users/ricky/.npm-global/bin/codex",
 KEYBOARD_LIGHTS_ON = True
 KEYBOARD_ON_BRIGHTNESS = 160
 PLAYBACK_MODE = False
+CG_EVENT_FLAG_OPTION = 1 << 19
 
 
 def load_config(path):
@@ -295,6 +296,12 @@ def run_backup_bottom_hotkey(action, pressed):
         event = quartz.CGEventCreateKeyboardEvent(None, key_code, bool(pressed))
         if not event:
             raise RuntimeError("could not create keyboard event")
+        # A synthetic modifier keycode alone is not always treated as a held
+        # modifier by macOS.  Carry the same flag state as a physical Option
+        # key so press-and-hold dictation can start before key-up.
+        if action == "talk":
+            quartz.CGEventSetFlags(
+                event, CG_EVENT_FLAG_OPTION if pressed else 0)
         quartz.CGEventPost(0, event)  # kCGHIDEventTap
         cf.CFRelease(event)
         return {"ok": True, "action": "backup_" + action, "pressed": bool(pressed)}

@@ -42,6 +42,9 @@ class EncoderZoomTests(unittest.TestCase):
         self.assertEqual([call.kwargs["flags"] for call in post.call_args_list],
                          [1 << 20, 1 << 20])
 
+    def test_voice_key_uses_the_macos_option_flag(self):
+        self.assertEqual(commandd.CG_EVENT_FLAG_OPTION, 1 << 19)
+
     def test_dial_four_rotation_and_press_share_ordered_lane(self):
         daemon = self.make_daemon()
         daemon._forward_command("encoder", source=0, clockwise=True)
