@@ -89,6 +89,54 @@ FUNCTION_ONLINE_STATE = "idle"
 DEFAULT_AGENT_SLOTS = dict(AGENT_SLOTS)
 DEFAULT_FUNCTION_SLOTS = dict(FUNCTION_SLOTS)
 DEFAULT_STATE_COLORS = dict(STATE_COLORS)
+CG_EVENT_FLAG_OPTION = 1 << 19
+
+
+def native_bottom_key_spec(action, pressed):
+    """Return the macOS keycode/flags for the two latency-sensitive keys."""
+    keycodes = {"talk": 58, "approve": 36}  # Option, Return
+    keycode = keycodes.get(action)
+    if keycode is None:
+        return None
+    flags = CG_EVENT_FLAG_OPTION if action == "talk" and pressed else 0
+    return keycode, flags
+
+
+def post_native_bottom_key(action, pressed):
+    """Post Option/Return directly from the HID reader, bypassing HTTP."""
+    spec = native_bottom_key_spec(action, pressed)
+    if spec is None:
+        return False
+    keycode, flags = spec
+    try:
+        quartz = ctypes.CDLL(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        quartz.CGEventCreateKeyboardEvent.argtypes = [c_void_p, c_ushort, ctypes.c_bool]
+        quartz.CGEventCreateKeyboardEvent.restype = c_void_p
+        quartz.CGEventSetFlags.argtypes = [c_void_p, ctypes.c_ulonglong]
+        quartz.CGEventPost.argtypes = [ctypes.c_uint32, c_void_p]
+        cf = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [c_void_p]
+
+        def emit(is_down, event_flags):
+            event = quartz.CGEventCreateKeyboardEvent(None, keycode, is_down)
+            if not event:
+                raise RuntimeError("could not create keyboard event")
+            quartz.CGEventSetFlags(event, event_flags)
+            quartz.CGEventPost(0, event)
+            cf.CFRelease(event)
+
+        if action == "talk" and pressed:
+            # Explicitly end any stale synthetic Option hold before beginning
+            # a new one.  This makes rapid release/re-press cycles distinct.
+            emit(False, 0)
+            time.sleep(0.005)
+        emit(bool(pressed), flags)
+        return True
+    except (OSError, RuntimeError) as exc:
+        log(f"⚠️ native {action} key failed: {exc}")
+        return False
 
 
 def validate_panel_profile(profile) -> list[str]:
@@ -537,8 +585,18 @@ class Daemon:
                 # Option and Return must mirror physical press/release. The
                 # two right function keys remain one-shot actions on press.
                 if pkt["pressed"] or action in ("talk", "approve"):
-                    self._forward_command(action, AGENT_SLOTS.get(self.selected_agent), slot,
-                                          pressed=bool(pkt["pressed"]))
+                    pressed = bool(pkt["pressed"])
+                    if action in ("talk", "approve"):
+                        # These are ordinary native keys, so bypass the local
+                        # HTTP adapter. Fall back only if Quartz is unavailable.
+                        if not post_native_bottom_key(action, pressed):
+                            self._forward_command(
+                                action, AGENT_SLOTS.get(self.selected_agent), slot,
+                                pressed=pressed)
+                    else:
+                        self._forward_command(
+                            action, AGENT_SLOTS.get(self.selected_agent), slot,
+                            pressed=pressed)
             # Restored firmware emits the owner's original native shortcuts:
             # Option / Return / Copy / Paste.  Do not duplicate them here.
             if pkt["pressed"] and slot in ENCODER_PRESS_SLOTS:

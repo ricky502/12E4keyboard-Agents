@@ -44,6 +44,12 @@ class EncoderZoomTests(unittest.TestCase):
 
     def test_voice_key_uses_the_macos_option_flag(self):
         self.assertEqual(commandd.CG_EVENT_FLAG_OPTION, 1 << 19)
+        self.assertEqual(clientd.native_bottom_key_spec("talk", True),
+                         (58, 1 << 19))
+        self.assertEqual(clientd.native_bottom_key_spec("talk", False),
+                         (58, 0))
+        self.assertEqual(clientd.native_bottom_key_spec("approve", True),
+                         (36, 0))
 
     def test_dial_four_rotation_and_press_share_ordered_lane(self):
         daemon = self.make_daemon()
