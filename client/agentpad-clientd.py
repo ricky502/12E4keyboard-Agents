@@ -82,14 +82,50 @@ SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
 # Verified from this physical board's event log, left-to-right pushes are
 # slots 14, 15, 13, 12 and must invoke light, sleep, play/pause, mode.
 ENCODER_PRESS_SLOTS = {14: 2, 15: 3, 13: 1, 12: 0}
-# Bottom row is the keyboard/client power indicator.  It stays at the neutral
-# idle white whenever this local daemon is running; only the eight Agent keys
-# communicate Agent state.
+# Legacy default retained for configuration/API compatibility.  The bottom row
+# is now painted as the selected Agent's action panel.
 FUNCTION_ONLINE_STATE = "idle"
+UNSELECTED_AGENT_SCALE = 0.42
 DEFAULT_AGENT_SLOTS = dict(AGENT_SLOTS)
 DEFAULT_FUNCTION_SLOTS = dict(FUNCTION_SLOTS)
 DEFAULT_STATE_COLORS = dict(STATE_COLORS)
 CG_EVENT_FLAG_OPTION = 1 << 19
+
+
+def scale_rgb(rgb, scale):
+    """Dim a color without changing its hue or animation semantics."""
+    return tuple(max(0, min(255, round(channel * scale))) for channel in rgb)
+
+
+def agent_visual(slot, state, selected_slot):
+    """Return the existing state color, with selection expressed as brightness."""
+    rgb, mode = STATE_COLORS[state]
+    if state == "idle":
+        mode = 2
+    if slot != selected_slot:
+        rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
+    return rgb, mode
+
+
+def action_panel_visuals(selected_state):
+    """Bottom-row hints for the currently selected Agent; actions never change."""
+    visuals = {slot: ((0, 0, 0), 0, "off") for slot in FUNCTION_SLOTS}
+    action_slots = {action: slot for slot, action in FUNCTION_SLOTS.items()}
+    idle_rgb, _ = STATE_COLORS["idle"]
+    # Talk remains the local power/client-online indicator.
+    visuals[action_slots["talk"]] = (idle_rgb, 0, "idle")
+    if selected_state == "idle":
+        visuals[action_slots["new_task"]] = (idle_rgb, 0, "idle")
+    elif selected_state == "needs_input":
+        rgb, mode = STATE_COLORS["needs_input"]
+        visuals[action_slots["approve"]] = (rgb, mode, "needs_input")
+    elif selected_state == "complete":
+        rgb, _ = STATE_COLORS["complete"]
+        visuals[action_slots["new_task"]] = (scale_rgb(rgb, 0.42), 0, "complete")
+    elif selected_state == "error":
+        rgb, mode = STATE_COLORS["error"]
+        visuals = {slot: (rgb, mode, "error") for slot in FUNCTION_SLOTS}
+    return visuals
 
 
 def native_bottom_key_spec(action, pressed):
@@ -373,8 +409,7 @@ class Daemon:
     def __init__(self, link: KeyboardLink, cfg: dict):
         self.link = link
         self.cfg = cfg
-        # A ready panel keeps every configured key visible: Agent keys breathe
-        # while idle, while the bottom-row function keys remain solid white.
+        # Agent states are kept separately from the bottom-row action hints.
         self.states = {s: "idle" for s in range(LED_COUNT)}
         self.state_meta = {s: {"updated_at": 0, "task_id": None, "source": None}
                            for s in range(LED_COUNT)}
@@ -422,16 +457,10 @@ class Daemon:
             return f"unknown state {state!r}"
         if not (0 <= slot < LED_COUNT):
             return f"slot out of range 0-{LED_COUNT - 1}"
-        # Function keys are not Agent status LEDs. Keep them lit as the
-        # local-power/client-online indicator even if a broad API update asks
-        # to clear every slot.
         if slot in FUNCTION_SLOTS:
-            state, task_id, source = FUNCTION_ONLINE_STATE, None, "client-online"
-        rgb, mode = STATE_COLORS[state]
-        # Visually distinguish connected Agent keys from the bottom-row power
-        # indicators: a ready Agent breathes white; function keys stay static.
-        if slot in AGENT_SLOTS and state == "idle":
-            mode = 2
+            self.paint_action_panel()
+            return f"{SLOT_AGENTS.get(slot, slot)}[{slot}]: action-panel"
+        rgb, mode = agent_visual(slot, state, self.selected_agent)
         prev = self.states[slot]
         try:
             updated_at = float(updated_at) if updated_at is not None else time.time()
@@ -445,15 +474,51 @@ class Daemon:
             ok2 = self.link.send(set_mode(slot, mode))
         if not (ok1 and ok2):
             self.online = False
+        if slot == self.selected_agent:
+            self.paint_action_panel()
         return f"{SLOT_AGENTS.get(slot, slot)}[{slot}]: {prev} -> {state}"
+
+    def paint_agent_selection(self, *slots):
+        """Repaint old/new selections while preserving every state hue and mode."""
+        for slot in dict.fromkeys(slots):
+            if slot not in AGENT_SLOTS:
+                continue
+            rgb, mode = agent_visual(slot, self.states[slot], self.selected_agent)
+            with self._lock:
+                ok1 = self.link.send(set_slot(slot, rgb))
+                ok2 = self.link.send(set_mode(slot, mode))
+            if not (ok1 and ok2):
+                self.online = False
+
+    def paint_action_panel(self):
+        """Paint bottom-row prompts from the selected Agent's current state."""
+        selected_state = self.states.get(self.selected_agent, "idle")
+        visuals = action_panel_visuals(selected_state)
+        now = time.time()
+        with self._lock:
+            for slot, (rgb, mode, display_state) in visuals.items():
+                self.states[slot] = display_state
+                self.state_meta[slot] = {
+                    "updated_at": now, "task_id": None, "source": "action-panel"}
+                ok1 = self.link.send(set_slot(slot, rgb))
+                ok2 = self.link.send(set_mode(slot, mode))
+                if not (ok1 and ok2):
+                    self.online = False
+
+    def select_agent_slot(self, slot):
+        old_slot = self.selected_agent
+        self.selected_agent = slot
+        self.paint_agent_selection(old_slot, slot)
+        self.paint_action_panel()
 
     def boot_paint(self):
         with self._lock:
             self.link.send(set_brightness(self.cfg.get("brightness", 160)))
             self.link.send(clear_all())
-        for s in range(LED_COUNT):
+        for s in AGENT_SLOTS:
             meta = self.state_meta[s]
             self.set_state(s, self.states[s], **meta)
+        self.paint_action_panel()
 
     def expire_agent_states(self):
         """Return stale remote LEDs to ready-white instead of leaving a history
@@ -578,7 +643,7 @@ class Daemon:
                 self._press_times[slot] = time.monotonic()
                 if slot in AGENT_SLOTS:
                     self.acknowledge_completion(slot)
-                    self.selected_agent = slot
+                    self.select_agent_slot(slot)
                     self._forward_command("select_agent", AGENT_SLOTS[slot], slot)
             if slot in FUNCTION_SLOTS:
                 action = self._command_for_slot(slot)
@@ -927,15 +992,11 @@ def make_handler(daemon: Daemon):
                 self._json(200, {"ok": True})
             elif self.path == "/clear":
                 daemon.link.send(clear_all())
-                for s in range(LED_COUNT):
-                    daemon.states[s] = FUNCTION_ONLINE_STATE
+                for s in AGENT_SLOTS:
+                    daemon.states[s] = "idle"
                     daemon.state_meta[s] = {"updated_at": time.time(), "task_id": None,
-                                            "source": "client-online" if s in FUNCTION_SLOTS else "local-agentpad-ready"}
-                    rgb, mode = STATE_COLORS[daemon.states[s]]
-                    if s in AGENT_SLOTS:
-                        mode = 2
-                    daemon.link.send(set_slot(s, rgb))
-                    daemon.link.send(set_mode(s, mode))
+                                            "source": "local-agentpad-ready"}
+                daemon.boot_paint()
                 self._json(200, {"ok": True})
             elif self.path == "/ping":
                 daemon._echo = (daemon._echo + 1) & 0xFF or 1

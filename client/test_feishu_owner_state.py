@@ -82,12 +82,17 @@ class OwnerStateTests(unittest.TestCase):
 
         link = Link()
         daemon = Daemon(link, {"feishu_status_self_owners": {"tanchun": SELF}})
+
+        def last_slot_color(slot):
+            return next(packet[:5] for packet in reversed(link.packets)
+                        if packet[0] == 1 and packet[1] == slot)
+
         daemon.set_agent_state("tanchun", "thinking", "a", owner=SELF)
-        self.assertEqual(link.packets[-2][:5], bytes([1, 0, 0, 60, 255]))
+        self.assertEqual(last_slot_color(0), bytes([1, 0, 0, 60, 255]))
         daemon.set_agent_state("tanchun", "thinking", "b", owner=OTHER)
-        self.assertEqual(link.packets[-2][:5], bytes([1, 0, 255, 190, 0]))
+        self.assertEqual(last_slot_color(0), bytes([1, 0, 255, 190, 0]))
         daemon.set_agent_state("tanchun", "complete", "a")
-        self.assertEqual(link.packets[-2][:5], bytes([1, 0, 255, 0, 0]))
+        self.assertEqual(last_slot_color(0), bytes([1, 0, 255, 0, 0]))
         self.assertEqual(daemon.health()["feishu_owner_activity"]["tanchun"]["active_tasks"], 1)
 
 
