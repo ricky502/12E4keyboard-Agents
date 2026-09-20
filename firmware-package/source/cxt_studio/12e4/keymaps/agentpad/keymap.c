@@ -31,6 +31,7 @@ static const uint8_t SLOT_TO_LED[AP_LED_COUNT] = {3, 2, 1, 0, 4, 5, 6, 7, 11, 10
 static uint8_t slot_rgb[AP_LED_COUNT][3]; // per-slot target color
 static uint8_t slot_mode[AP_LED_COUNT];   // 0=static 1=blink 2=breathe
 static uint8_t global_scale = 160;        // comfortable default for ws2812
+static bool playback_mode = false;        // dial 4: false=zoom, true=video speed
 
 static uint8_t ap_scale8(uint8_t v, uint8_t s) {
     return (uint16_t)v * s / 255;
@@ -118,6 +119,13 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     if (slot == 8 || slot == 9) {
         return true;
     }
+    // The fourth physical dial is matrix slot 12.  Keep its mode locally so
+    // rotations can emit native USB keys without waiting for the Mac client.
+    // The Raw-HID press is still reported so the client can show the mode
+    // notification and keep its fallback state synchronized.
+    if (slot == 12 && record->event.pressed) {
+        playback_mode = !playback_mode;
+    }
     uint8_t pkt[AP_EPSIZE] = {0};
     pkt[0] = 0x81; // KEY_EVENT
     pkt[1] = slot; // slot 0-15
@@ -128,15 +136,27 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 }
 
 bool encoder_update_user(uint8_t index, bool clockwise) {
-    // Report detents only.  The macOS Agentpad client owns all encoder
-    // actions, including brightness, seek, volume, zoom, and playback speed.
-    // Do not emit QMK's native media/zoom keycodes here: doing so would make
-    // playback-speed mode change the browser zoom at the same time.
-    uint8_t pkt[AP_EPSIZE] = {0};
-    pkt[0] = 0x82; // ENC_EVENT
-    pkt[1] = index;
-    pkt[2] = clockwise ? 1 : 0;
-    pkt[3] = (uint8_t)get_highest_layer(layer_state);
-    raw_hid_send(pkt, AP_EPSIZE);
+    // Physical left-to-right encoder indices on this board are 2, 3, 1, 0.
+    // Emit native USB keyboard/consumer keys for every detent.  This removes
+    // the Raw-HID -> local HTTP -> Quartz/AppleScript round trip and makes the
+    // controls react like an ordinary hardware keyboard.
+    switch (index) {
+        case 2: // dial 1: display brightness
+            tap_code16(clockwise ? KC_BRIU : KC_BRID);
+            break;
+        case 3: // dial 2: media fast-forward / rewind
+            tap_code16(clockwise ? KC_MFFD : KC_MRWD);
+            break;
+        case 1: // dial 3: system volume
+            tap_code16(clockwise ? KC_VOLU : KC_VOLD);
+            break;
+        case 0: // dial 4: text zoom, or browser playback speed
+            if (playback_mode) {
+                tap_code(clockwise ? KC_RBRC : KC_LBRC);
+            } else {
+                tap_code16(clockwise ? LGUI(KC_EQL) : LGUI(KC_MINS));
+            }
+            break;
+    }
     return false;
 }

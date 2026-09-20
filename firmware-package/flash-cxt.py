@@ -118,10 +118,9 @@ def load_image(path):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    # Use the freshly rebuilt Raw-HID-only image.  Older v7/v4 images still
-    # contained native encoder keycodes despite their comments, which could
-    # make playback-speed mode zoom the browser at the same time.
-    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v13_native_bottom_keys.hex")
+    # v14 keeps mode selection in firmware and emits each encoder detent as a
+    # native USB key, avoiding the local HTTP/automation round trip.
+    agentpad_hex = os.path.join(here, "firmware", "cxt_studio_12e4_agentpad_v14_native_encoders.hex")
     rev8_hex = os.path.join(here, "firmware", "cxt_labs_cxt12e4_D&M_Rev8_0530.hex")
     target = rev8_hex if "--rev8" in sys.argv else agentpad_hex
     no_launch = "--no-launch" in sys.argv
