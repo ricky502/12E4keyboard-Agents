@@ -101,8 +101,10 @@ def agent_visual(slot, state, selected_slot):
     """Return the existing state color, with selection expressed as brightness."""
     rgb, mode = STATE_COLORS[state]
     if state == "idle":
+        if slot != selected_slot:
+            return (0, 0, 0), 0
         mode = 2
-    if slot != selected_slot:
+    elif slot != selected_slot:
         rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
     return rgb, mode
 

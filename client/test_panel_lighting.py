@@ -25,6 +25,13 @@ class PanelLightingTests(unittest.TestCase):
         self.assertTrue(all(a <= b for a, b in zip(other_rgb, selected_rgb)))
         self.assertNotEqual(other_rgb, selected_rgb)
 
+    def test_only_selected_idle_agent_breathes(self):
+        selected_rgb, selected_mode = clientd.agent_visual(2, "idle", 2)
+        other_rgb, other_mode = clientd.agent_visual(1, "idle", 2)
+        self.assertEqual(selected_rgb, clientd.STATE_COLORS["idle"][0])
+        self.assertEqual(selected_mode, 2)
+        self.assertEqual((other_rgb, other_mode), ((0, 0, 0), 0))
+
     def test_selection_never_changes_error_or_owner_hue(self):
         for state in ("thinking", "thinking_shared", "thinking_other", "error"):
             original, original_mode = clientd.STATE_COLORS[state]
