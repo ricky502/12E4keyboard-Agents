@@ -98,17 +98,16 @@ def scale_rgb(rgb, scale):
 
 
 def agent_visual(slot, state, selected_slot):
-    """Preserve state hue while making the selected active Agent breathe."""
+    """Keep selection steady while other active Agents breathe in their hue."""
     rgb, mode = STATE_COLORS[state]
     if state == "idle":
         if slot != selected_slot:
             return (0, 0, 0), 0
         mode = 2
-    elif slot == selected_slot and state in {
-            "thinking", "thinking_shared", "thinking_other"}:
-        mode = 2
     elif slot != selected_slot:
         rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
+        if state in {"thinking", "thinking_shared", "thinking_other"}:
+            mode = 2
     return rgb, mode
 
 
