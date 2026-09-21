@@ -98,11 +98,14 @@ def scale_rgb(rgb, scale):
 
 
 def agent_visual(slot, state, selected_slot):
-    """Return the existing state color, with selection expressed as brightness."""
+    """Preserve state hue while making the selected active Agent breathe."""
     rgb, mode = STATE_COLORS[state]
     if state == "idle":
         if slot != selected_slot:
             return (0, 0, 0), 0
+        mode = 2
+    elif slot == selected_slot and state in {
+            "thinking", "thinking_shared", "thinking_other"}:
         mode = 2
     elif slot != selected_slot:
         rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
@@ -432,7 +435,8 @@ class Daemon:
         self._owner_agents = set()
         self._stop = threading.Event()
         self._next_reconnect_scan = 0.0
-        self.selected_agent = 0
+        self.selection_path = os.path.join(HERE, "selected-agent")
+        self.selected_agent = self._load_selected_agent()
         self._press_times = {}
         self._encoder_press_times = {}
         self.profile_warnings = []
@@ -454,6 +458,28 @@ class Daemon:
                              daemon=True, name=f"agentpad-command-{lane}").start()
 
     # ---- 状态 -> 灯 ----
+    def _load_selected_agent(self):
+        try:
+            with open(self.selection_path, encoding="utf-8") as handle:
+                selected_name = handle.read(128).strip()
+            return next((slot for slot, name in AGENT_SLOTS.items()
+                         if name == selected_name), 0)
+        except OSError:
+            return 0
+
+    def _save_selected_agent(self):
+        temporary = self.selection_path + ".tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as handle:
+                handle.write(AGENT_SLOTS[self.selected_agent] + "\n")
+            os.replace(temporary, self.selection_path)
+        except OSError as exc:
+            log("⚠️ 保存当前 Agent 失败:", exc)
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
     def set_state(self, slot: int, state: str, task_id=None, updated_at=None, source=None) -> str:
         if state not in STATE_COLORS:
             return f"unknown state {state!r}"
@@ -510,6 +536,7 @@ class Daemon:
     def select_agent_slot(self, slot):
         old_slot = self.selected_agent
         self.selected_agent = slot
+        self._save_selected_agent()
         self.paint_agent_selection(old_slot, slot)
         self.paint_action_panel()
 

@@ -1,6 +1,7 @@
 """Selection highlight and bottom action-panel regression tests."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -21,7 +22,8 @@ class PanelLightingTests(unittest.TestCase):
         selected_rgb, selected_mode = clientd.agent_visual(2, "thinking_shared", 2)
         other_rgb, other_mode = clientd.agent_visual(1, "thinking_shared", 2)
         self.assertEqual(selected_rgb, clientd.STATE_COLORS["thinking_shared"][0])
-        self.assertEqual(selected_mode, other_mode)
+        self.assertEqual(selected_mode, 2)
+        self.assertEqual(other_mode, clientd.STATE_COLORS["thinking_shared"][1])
         self.assertTrue(all(a <= b for a, b in zip(other_rgb, selected_rgb)))
         self.assertNotEqual(other_rgb, selected_rgb)
 
@@ -32,11 +34,20 @@ class PanelLightingTests(unittest.TestCase):
         self.assertEqual(selected_mode, 2)
         self.assertEqual((other_rgb, other_mode), ((0, 0, 0), 0))
 
-    def test_selection_never_changes_error_or_owner_hue(self):
+    def test_selection_never_changes_state_hue(self):
         for state in ("thinking", "thinking_shared", "thinking_other", "error"):
             original, original_mode = clientd.STATE_COLORS[state]
             selected, selected_mode = clientd.agent_visual(0, state, 0)
-            self.assertEqual((selected, selected_mode), (original, original_mode))
+            self.assertEqual(selected, original)
+            expected_mode = 2 if state.startswith("thinking") else original_mode
+            self.assertEqual(selected_mode, expected_mode)
+
+    def test_selected_active_agent_breathes_while_other_stays_constant(self):
+        for state in ("thinking", "thinking_shared", "thinking_other"):
+            _, selected_mode = clientd.agent_visual(0, state, 0)
+            _, other_mode = clientd.agent_visual(1, state, 0)
+            self.assertEqual(selected_mode, 2)
+            self.assertEqual(other_mode, clientd.STATE_COLORS[state][1])
 
     def test_idle_action_panel(self):
         visuals = clientd.action_panel_visuals("idle")
@@ -61,6 +72,17 @@ class PanelLightingTests(unittest.TestCase):
             visuals = clientd.action_panel_visuals(state)
             self.assertEqual(visuals[8][2], "idle")
             self.assertEqual({visuals[slot][2] for slot in (9, 10, 11)}, {"off"})
+
+    def test_selected_agent_survives_client_restart(self):
+        class Link:
+            mock = True
+
+        daemon = clientd.Daemon(Link(), {})
+        with tempfile.TemporaryDirectory() as directory:
+            daemon.selection_path = str(Path(directory) / "selected-agent")
+            daemon.selected_agent = 6
+            daemon._save_selected_agent()
+            self.assertEqual(daemon._load_selected_agent(), 6)
 
 
 if __name__ == "__main__":
