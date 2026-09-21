@@ -876,13 +876,16 @@ class Daemon:
         return {"ok": True, "profile": safe_panel_profile(self.cfg)}
 
     def set_agent_state(self, agent, state, task_id=None, source=None,
-                        owner=None, chat=None):
+                        owner=None, chat=None, ts=None, seq=None):
         slot = next((s for s, name in AGENT_SLOTS.items() if name == agent), -1)
         if slot < 0:
             return
         with self._owner_lock:
             self._owner_agents.add(agent)
-            view = self.owner_state.update(agent, state, task_id, owner, chat)
+            view = self.owner_state.update(
+                agent, state, task_id, owner, chat, ts=ts, seq=seq)
+        if not view.pop("_applied", True):
+            return
         result = self.set_state(slot, view["state"], task_id=view["task_id"],
                                 source=source)
         log(f"✦ 飞书状态 {agent} {state} -> {view['state']} "

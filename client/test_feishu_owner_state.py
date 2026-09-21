@@ -47,6 +47,37 @@ class OwnerStateTests(unittest.TestCase):
         self.states.update("daiyu", "complete", "x", now=11)
         self.assertEqual(self.states.update("daiyu", "thinking", "x", now=12)["state"], "complete")
 
+    def test_ordered_idle_can_resume_same_task(self):
+        self.states.update("tanchun", "thinking", "x", SELF, now=10, ts=100, seq=1)
+        self.states.update("tanchun", "idle", "x", SELF, now=11, ts=101, seq=2)
+        resumed = self.states.update(
+            "tanchun", "thinking", "x", SELF, now=12, ts=102, seq=3)
+        self.assertTrue(resumed["_applied"])
+        self.assertEqual(resumed["state"], "thinking")
+        self.assertEqual(resumed["applied_seq"], 3)
+
+    def test_ordered_stale_replay_is_dropped(self):
+        self.states.update("tanchun", "thinking", "x", SELF, now=10, ts=100, seq=5)
+        self.states.update("tanchun", "idle", "x", SELF, now=11, ts=101, seq=6)
+        replay = self.states.update(
+            "tanchun", "thinking", "x", SELF, now=12, ts=99, seq=5)
+        self.assertFalse(replay["_applied"])
+        self.assertEqual(replay["state"], "idle")
+        self.assertEqual(replay["dropped_stale"], 1)
+
+    def test_same_seq_uses_timestamp_tiebreak(self):
+        self.states.update("tanchun", "idle", "x", SELF, now=10, ts=100, seq=5)
+        resumed = self.states.update(
+            "tanchun", "thinking", "x", SELF, now=11, ts=101, seq=5)
+        self.assertTrue(resumed["_applied"])
+        self.assertEqual(resumed["state"], "thinking")
+
+    def test_active_expiry_falls_to_idle_not_old_terminal(self):
+        self.states.update("tanchun", "complete", "old", SELF, now=1, ts=1, seq=1)
+        self.states.update("tanchun", "thinking", "new", SELF, now=10, ts=10, seq=2)
+        changed = self.states.expire(30, active_ttl=15, terminal_ttl=60)
+        self.assertEqual(changed[0][1]["state"], "idle")
+
     def test_expire_only_stale_owner(self):
         self.states.update("tanchun", "thinking", "a", SELF, now=10)
         self.states.update("tanchun", "thinking", "b", OTHER, now=20)
@@ -55,8 +86,9 @@ class OwnerStateTests(unittest.TestCase):
 
     def test_parse_owner_and_chat(self):
         status = parse_status('[AGENTPAD] {"agent":"tanchun","state":"thinking","task_id":"a",'
-                              '"owner":"ou_self","chat":"oc_chat"}')
-        self.assertEqual((status["owner"], status["chat"]), (SELF, "oc_chat"))
+                              '"owner":"ou_self","chat":"oc_chat","ts":100,"seq":4}')
+        self.assertEqual((status["owner"], status["chat"], status["ts"], status["seq"]),
+                         (SELF, "oc_chat", 100, 4))
         self.assertIsNone(parse_status('[AGENTPAD] {"agent":"tanchun","state":"thinking",'
                                        '"owner":{"bad":true}}'))
 

@@ -55,9 +55,15 @@ def parse_status(text: str):
         return None
     if chat is not None and (not isinstance(chat, str) or len(chat) > 128):
         return None
+    ts, seq = body.get("ts"), body.get("seq")
+    if ts is not None and (isinstance(ts, bool) or not isinstance(ts, int)):
+        return None
+    if seq is not None and (isinstance(seq, bool) or not isinstance(seq, int)):
+        return None
     return {"agent": body["agent"], "state": body["state"],
             "task_id": str(task_id) if task_id is not None else None,
-            "owner": owner or None, "chat": chat or None}
+            "owner": owner or None, "chat": chat or None,
+            "ts": ts, "seq": seq}
 
 
 class FeishuStatusListener:

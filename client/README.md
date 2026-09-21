@@ -112,8 +112,10 @@ GET  /health       → 在线状态+全部槽位
 状态群消息只接受这一种格式，其他聊天内容在本机直接丢弃、不会保存：
 
 ```
-[AGENTPAD] {"agent":"tanchun","state":"thinking","task_id":"optional"}
+[AGENTPAD] {"agent":"tanchun","state":"thinking","task_id":"optional","ts":1789894800,"seq":4}
 ```
+
+新版远端状态应携带每 Agent 单调递增的 `seq` 和 Unix 秒 `ts`。本机用它们拒绝乱序重放，同时允许同一 `task_id` 在临时 `idle` 后重新进入 `thinking`；旧版无序号消息继续兼容。`/health` 的 `feishu_owner_activity` 会显示各 Agent 的 `applied_seq` 和 `dropped_stale`。
 
 ## 排障
 
