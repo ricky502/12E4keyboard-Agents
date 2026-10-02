@@ -105,9 +105,12 @@ def agent_visual(slot, state, selected_slot):
             return (0, 0, 0), 0
         mode = 2
     elif slot != selected_slot:
-        rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
         if state in {"thinking", "thinking_shared", "thinking_other"}:
+            # Active Agents must remain unmistakable even when the foreground
+            # app was selected manually instead of through the keyboard.
             mode = 2
+        else:
+            rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
     return rgb, mode
 
 

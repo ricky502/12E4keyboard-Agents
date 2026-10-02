@@ -23,9 +23,8 @@ class PanelLightingTests(unittest.TestCase):
         other_rgb, other_mode = clientd.agent_visual(1, "thinking_shared", 2)
         self.assertEqual(selected_rgb, clientd.STATE_COLORS["thinking_shared"][0])
         self.assertEqual(selected_mode, clientd.STATE_COLORS["thinking_shared"][1])
+        self.assertEqual(other_rgb, selected_rgb)
         self.assertEqual(other_mode, 2)
-        self.assertTrue(all(a <= b for a, b in zip(other_rgb, selected_rgb)))
-        self.assertNotEqual(other_rgb, selected_rgb)
 
     def test_only_selected_idle_agent_breathes(self):
         selected_rgb, selected_mode = clientd.agent_visual(2, "idle", 2)
@@ -43,10 +42,17 @@ class PanelLightingTests(unittest.TestCase):
 
     def test_selected_active_agent_stays_constant_while_other_breathes(self):
         for state in ("thinking", "thinking_shared", "thinking_other"):
-            _, selected_mode = clientd.agent_visual(0, state, 0)
-            _, other_mode = clientd.agent_visual(1, state, 0)
+            selected_rgb, selected_mode = clientd.agent_visual(0, state, 0)
+            other_rgb, other_mode = clientd.agent_visual(1, state, 0)
+            self.assertEqual(selected_rgb, clientd.STATE_COLORS[state][0])
+            self.assertEqual(other_rgb, selected_rgb)
             self.assertEqual(selected_mode, clientd.STATE_COLORS[state][1])
             self.assertEqual(other_mode, 2)
+
+    def test_unselected_terminal_state_remains_dimmed(self):
+        selected_rgb, _ = clientd.agent_visual(0, "complete", 0)
+        other_rgb, _ = clientd.agent_visual(1, "complete", 0)
+        self.assertNotEqual(other_rgb, selected_rgb)
 
     def test_idle_action_panel(self):
         visuals = clientd.action_panel_visuals("idle")
