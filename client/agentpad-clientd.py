@@ -74,7 +74,7 @@ STATE_STALE_S = 15 * 60
 
 AGENT_SLOTS = {
     0: "tanchun", 1: "daiyu", 2: "xiangyun", 3: "xiangling",
-    4: "yinger", 5: "codex", 6: "claude-vscode", 7: "baochai",
+    4: "zijuan", 5: "codex", 6: "claude-vscode", 7: "baochai",
 }
 FUNCTION_SLOTS = {8: "talk", 9: "approve", 10: "reject", 11: "new_task"}
 SLOT_AGENTS = {**AGENT_SLOTS, **FUNCTION_SLOTS}
@@ -97,20 +97,20 @@ def scale_rgb(rgb, scale):
     return tuple(max(0, min(255, round(channel * scale))) for channel in rgb)
 
 
-def agent_visual(slot, state, selected_slot):
-    """Keep selection steady while other active Agents breathe in their hue."""
+def agent_visual(slot, state, selected_slot, idle_recent=True):
+    """Blink the selected active Agent; keep other active Agents steady."""
     rgb, mode = STATE_COLORS[state]
     if state == "idle":
-        if slot != selected_slot:
+        if slot != selected_slot or not idle_recent:
             return (0, 0, 0), 0
         mode = 2
-    elif slot != selected_slot:
-        if state in {"thinking", "thinking_shared", "thinking_other"}:
-            # Active Agents must remain unmistakable even when the foreground
-            # app was selected manually instead of through the keyboard.
+    elif state in {"thinking", "thinking_shared", "thinking_other"}:
+        # The selected Agent blinks to identify the current target. Other
+        # active Agents stay solid so every task remains visible at a glance.
+        if slot == selected_slot:
             mode = 2
-        else:
-            rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
+    elif slot != selected_slot:
+        rgb = scale_rgb(rgb, UNSELECTED_AGENT_SCALE)
     return rgb, mode
 
 
@@ -423,8 +423,11 @@ class Daemon:
         for s in FUNCTION_SLOTS:
             self.state_meta[s] = {"updated_at": time.time(), "task_id": None,
                                   "source": "client-online"}
+        idle_expired_at = time.time() - STATE_STALE_S - 1
         for s in AGENT_SLOTS:
-            self.state_meta[s] = {"updated_at": time.time(), "task_id": None,
+            # After a daemon restart we have no fresh remote activity to show.
+            # Start Agent indicators dark until a new status or selection arrives.
+            self.state_meta[s] = {"updated_at": idle_expired_at, "task_id": None,
                                   "source": "local-agentpad-ready"}
         self.online = False
         self.t0 = time.time()
@@ -439,6 +442,8 @@ class Daemon:
         self._next_reconnect_scan = 0.0
         self.selection_path = os.path.join(HERE, "selected-agent")
         self.selected_agent = self._load_selected_agent()
+        self.selected_at = 0.0
+        self._idle_darkened = set()
         self._press_times = {}
         self._encoder_press_times = {}
         self.profile_warnings = []
@@ -490,16 +495,18 @@ class Daemon:
         if slot in FUNCTION_SLOTS:
             self.paint_action_panel()
             return f"{SLOT_AGENTS.get(slot, slot)}[{slot}]: action-panel"
-        rgb, mode = agent_visual(slot, state, self.selected_agent)
-        prev = self.states[slot]
         try:
             updated_at = float(updated_at) if updated_at is not None else time.time()
         except (TypeError, ValueError):
             updated_at = time.time()
+        idle_recent = max(updated_at, self.selected_at if slot == self.selected_agent else 0) >= time.time() - STATE_STALE_S
+        rgb, mode = agent_visual(slot, state, self.selected_agent, idle_recent)
+        prev = self.states[slot]
         with self._lock:
             self.states[slot] = state
             self.state_meta[slot] = {"updated_at": updated_at, "task_id": task_id,
                                      "source": source}
+            self._idle_darkened.discard(slot)
             ok1 = self.link.send(set_slot(slot, rgb))
             ok2 = self.link.send(set_mode(slot, mode))
         if not (ok1 and ok2):
@@ -513,7 +520,9 @@ class Daemon:
         for slot in dict.fromkeys(slots):
             if slot not in AGENT_SLOTS:
                 continue
-            rgb, mode = agent_visual(slot, self.states[slot], self.selected_agent)
+            updated = self.state_meta[slot].get("updated_at") or 0
+            idle_recent = max(updated, self.selected_at if slot == self.selected_agent else 0) >= time.time() - STATE_STALE_S
+            rgb, mode = agent_visual(slot, self.states[slot], self.selected_agent, idle_recent)
             with self._lock:
                 ok1 = self.link.send(set_slot(slot, rgb))
                 ok2 = self.link.send(set_mode(slot, mode))
@@ -538,6 +547,8 @@ class Daemon:
     def select_agent_slot(self, slot):
         old_slot = self.selected_agent
         self.selected_agent = slot
+        self.selected_at = time.time()
+        self._idle_darkened.discard(slot)
         self._save_selected_agent()
         self.paint_agent_selection(old_slot, slot)
         self.paint_action_panel()
@@ -585,6 +596,14 @@ class Daemon:
         for slot, previous, age in expired:
             result = self.set_state(slot, "idle", source="state-timeout")
             log(f"⌛ 状态超时 {SLOT_AGENTS[slot]} {previous} ({age}s) -> idle ({result})")
+        selected = self.selected_agent
+        selected_updated = self.state_meta[selected].get("updated_at") or 0
+        if (self.states[selected] == "idle" and
+                now - max(selected_updated, self.selected_at) >= STATE_STALE_S and
+                selected not in self._idle_darkened):
+            self._idle_darkened.add(selected)
+            self.paint_agent_selection(selected)
+            log(f"⌛ 空闲超过 {STATE_STALE_S}s，熄灭当前 Agent 灯: {SLOT_AGENTS[selected]}")
 
     def resolve_slot(self, body: dict) -> int:
         """body 里 agent 名或 slot 数字 -> 槽位; 无效返回 -1."""
@@ -906,6 +925,9 @@ class Daemon:
 
     def set_agent_state(self, agent, state, task_id=None, source=None,
                         owner=None, chat=None, ts=None, seq=None):
+        # Keep legacy scheduled jobs that still report yinger working on slot 4.
+        if agent == "yinger":
+            agent = "zijuan"
         slot = next((s for s, name in AGENT_SLOTS.items() if name == agent), -1)
         if slot < 0:
             return

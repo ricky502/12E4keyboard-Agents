@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 
-VALID_AGENTS = {"tanchun", "daiyu", "xiangyun", "xiangling", "yinger", "codex", "claude-vscode", "baochai"}
+VALID_AGENTS = {"tanchun", "daiyu", "xiangyun", "xiangling", "yinger", "zijuan", "codex", "claude-vscode", "baochai"}
 VALID_STATES = {"idle", "thinking", "complete", "needs_input", "error", "off"}
 
 
